@@ -10,5 +10,5 @@ anyhow = "1.0"
 mime_guess = "2.0"
 futures = "0.3"
 tokio-util = { version = "0.7", features = ["codec"] }
-html-escape = "0.2.5"
+html-escape = "0.2.13"
 percent-encoding = "2.3"

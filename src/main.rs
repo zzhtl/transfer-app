@@ -5,10 +5,12 @@ use hyper::{Body, Request, Response, Server, StatusCode};
 use mime_guess::from_path;
 use percent_encoding::{NON_ALPHANUMERIC, percent_encode};
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
+
+mod html;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -69,7 +71,7 @@ async fn handle_request(req: Request<Body>, dir_path: Arc<PathBuf>) -> Result<Re
 
     // 处理目录请求
     if tokio::fs::metadata(&canonical_path).await?.is_dir() {
-        return handle_directory(&canonical_path, request_path).await;
+        return html::handle_directory(&canonical_path, request_path).await;
     }
 
     // 处理文件请求
@@ -103,31 +105,31 @@ async fn handle_request(req: Request<Body>, dir_path: Arc<PathBuf>) -> Result<Re
     }
 }
 
-async fn handle_directory(path: &Path, request_path: &str) -> Result<Response<Body>> {
-    let mut dir_entries = tokio::fs::read_dir(path).await?;
-    let mut html = String::from("<html><body><h1>Directory Listing</h1><ul>");
+// async fn handle_directory(path: &Path, request_path: &str) -> Result<Response<Body>> {
+//     let mut dir_entries = tokio::fs::read_dir(path).await?;
+//     let mut html = String::from("<html><body><h1>Directory Listing</h1><ul>");
 
-    while let Some(entry) = dir_entries.next_entry().await? {
-        let file_name = entry.file_name();
-        let file_name_str = file_name.to_string_lossy();
-        let escaped_name = html_escape::encode_text(&file_name_str);
+//     while let Some(entry) = dir_entries.next_entry().await? {
+//         let file_name = entry.file_name();
+//         let file_name_str = file_name.to_string_lossy();
+//         let escaped_name = html_escape::encode_text(&file_name_str);
 
-        let path = if request_path.ends_with('/') {
-            format!("{}{}", request_path, file_name_str)
-        } else {
-            format!("{}/{}", request_path, file_name_str)
-        };
-        let escaped_path = html_escape::encode_text(&path);
+//         let path = if request_path.ends_with('/') {
+//             format!("{}{}", request_path, file_name_str)
+//         } else {
+//             format!("{}/{}", request_path, file_name_str)
+//         };
+//         let escaped_path = html_escape::encode_text(&path);
 
-        html.push_str(&format!(
-            "<li><a href='{}'>{}</a></li>",
-            escaped_path, escaped_name
-        ));
-    }
+//         html.push_str(&format!(
+//             "<li><a href='{}'>{}</a></li>",
+//             escaped_path, escaped_name
+//         ));
+//     }
 
-    html.push_str("</ul></body></html>");
-    Ok(Response::new(Body::from(html)))
-}
+//     html.push_str("</ul></body></html>");
+//     Ok(Response::new(Body::from(html)))
+// }
 
 fn not_found_response() -> Response<Body> {
     Response::builder()
