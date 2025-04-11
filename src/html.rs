@@ -181,7 +181,7 @@ pub async fn handle_directory(path: &Path, request_path: &str) -> Result<Respons
                     </form>
                 </div>
                 <footer>
-                    <p>由 Rust HTTP 服务器强力驱动</p>
+                    <p>RainPure</p>
                 </footer>
             </div>
         </body>

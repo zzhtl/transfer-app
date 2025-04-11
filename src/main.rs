@@ -1,5 +1,7 @@
 use anyhow::{Result, anyhow};
+use async_compression::tokio::bufread::GzipEncoder;
 use futures::future::FutureExt;
+use hyper::header::TRANSFER_ENCODING;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server, StatusCode};
 use mime_guess::from_path;
@@ -8,8 +10,8 @@ use percent_encoding::{NON_ALPHANUMERIC, percent_encode};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
+use tokio_util::io::ReaderStream;
 
 mod html;
 
@@ -63,13 +65,21 @@ async fn handle_get(req: Request<Body>, dir_path: Arc<PathBuf>) -> Result<Respon
             .body(Body::empty())?);
     }
 
+    // 检查客户端是否接受gzip编码
+    let supports_gzip = req
+        .headers()
+        .get("Accept-Encoding")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.contains("gzip"))
+        .unwrap_or(false);
+
     let request_path = req.uri().path();
     let decoded_path = percent_encoding::percent_decode_str(request_path)
         .decode_utf8_lossy()
         .to_string();
     let full_path = dir_path.join(&decoded_path[1..]); // 去掉前导斜杠
 
-    // 安全验证：确保路径在允许的目录内
+    // 安全验证
     let canonical_path = match tokio::fs::canonicalize(&full_path).await {
         Ok(p) => p,
         Err(_) => return Ok(not_found_response()),
@@ -87,31 +97,45 @@ async fn handle_get(req: Request<Body>, dir_path: Arc<PathBuf>) -> Result<Respon
     }
 
     // 处理文件请求
-    match File::open(&canonical_path).await {
+    match tokio::fs::File::open(&canonical_path).await {
         Ok(file) => {
-            let stream = FramedRead::new(file, BytesCodec::new());
-            let body = Body::wrap_stream(stream);
-
             let mime_type = from_path(&canonical_path).first_or_octet_stream();
             let file_name = canonical_path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("file");
 
-            // 对文件名进行RFC 5987编码
+            // 对文件名进行编码
             let encoded_filename = percent_encode(file_name.as_bytes(), NON_ALPHANUMERIC);
-
-            // 构造Content-Disposition头
             let content_disposition = format!(
                 "attachment; filename=\"{}\"; filename*=UTF-8''{}",
-                file_name.replace("\"", "\\\""), // 转义双引号
+                file_name.replace("\"", "\\\""),
                 encoded_filename
             );
 
-            Ok(Response::builder()
+            let mut response_builder = Response::builder()
+                .header(TRANSFER_ENCODING, "chunked")
                 .header("Content-Type", mime_type.as_ref())
-                .header("Content-Disposition", content_disposition)
-                .body(body)?)
+                .header("Content-Disposition", content_disposition);
+
+            if supports_gzip {
+                // 使用Gzip压缩
+                let buf_reader = tokio::io::BufReader::new(file);
+                let gzip_stream = GzipEncoder::new(buf_reader);
+                let stream = ReaderStream::new(gzip_stream);
+                let body = Body::wrap_stream(stream);
+
+                response_builder = response_builder
+                    .header("Content-Encoding", "gzip")
+                    .header("Vary", "Accept-Encoding");
+
+                Ok(response_builder.body(body)?)
+            } else {
+                // 不压缩的情况
+                let stream = FramedRead::with_capacity(file, BytesCodec::new(), 64 * 1024);
+                let body = Body::wrap_stream(stream);
+                Ok(response_builder.body(body)?)
+            }
         }
         Err(_) => Ok(not_found_response()),
     }
