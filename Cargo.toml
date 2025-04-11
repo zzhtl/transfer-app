@@ -12,3 +12,5 @@ futures = "0.3"
 tokio-util = { version = "0.7", features = ["codec"] }
 html-escape = "0.2.13"
 percent-encoding = "2.3"
+multer = "2.1.0"
+sanitize-filename = "0.4"

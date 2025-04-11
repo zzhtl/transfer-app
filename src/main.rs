@@ -1,8 +1,9 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use futures::future::FutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server, StatusCode};
 use mime_guess::from_path;
+use multer::parse_boundary;
 use percent_encoding::{NON_ALPHANUMERIC, percent_encode};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -45,6 +46,17 @@ async fn main() -> Result<()> {
 }
 
 async fn handle_request(req: Request<Body>, dir_path: Arc<PathBuf>) -> Result<Response<Body>> {
+    match req.method() {
+        &hyper::Method::GET => handle_get(req, dir_path).await,
+        &hyper::Method::POST => handle_post(req, dir_path).await,
+        &hyper::Method::DELETE => handle_delete(req, dir_path).await, // 新增
+        _ => Ok(Response::builder()
+            .status(StatusCode::METHOD_NOT_ALLOWED)
+            .body(Body::empty())?),
+    }
+}
+
+async fn handle_get(req: Request<Body>, dir_path: Arc<PathBuf>) -> Result<Response<Body>> {
     if req.method() != hyper::Method::GET {
         return Ok(Response::builder()
             .status(StatusCode::METHOD_NOT_ALLOWED)
@@ -105,31 +117,104 @@ async fn handle_request(req: Request<Body>, dir_path: Arc<PathBuf>) -> Result<Re
     }
 }
 
-// async fn handle_directory(path: &Path, request_path: &str) -> Result<Response<Body>> {
-//     let mut dir_entries = tokio::fs::read_dir(path).await?;
-//     let mut html = String::from("<html><body><h1>Directory Listing</h1><ul>");
+async fn handle_post(req: Request<Body>, dir_path: Arc<PathBuf>) -> Result<Response<Body>> {
+    let request_path = req.uri().path();
+    let decoded_path = percent_encoding::percent_decode_str(request_path)
+        .decode_utf8_lossy()
+        .to_string();
+    let full_path = dir_path.join(&decoded_path[1..]);
 
-//     while let Some(entry) = dir_entries.next_entry().await? {
-//         let file_name = entry.file_name();
-//         let file_name_str = file_name.to_string_lossy();
-//         let escaped_name = html_escape::encode_text(&file_name_str);
+    // 路径安全检查
+    let canonical_path = match tokio::fs::canonicalize(&full_path).await {
+        Ok(p) => p,
+        Err(_) => return Ok(not_found_response()),
+    };
 
-//         let path = if request_path.ends_with('/') {
-//             format!("{}{}", request_path, file_name_str)
-//         } else {
-//             format!("{}/{}", request_path, file_name_str)
-//         };
-//         let escaped_path = html_escape::encode_text(&path);
+    if !canonical_path.starts_with(&*dir_path) {
+        return Ok(Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(Body::empty())?);
+    }
 
-//         html.push_str(&format!(
-//             "<li><a href='{}'>{}</a></li>",
-//             escaped_path, escaped_name
-//         ));
-//     }
+    handle_upload(req, canonical_path).await
+}
 
-//     html.push_str("</ul></body></html>");
-//     Ok(Response::new(Body::from(html)))
-// }
+async fn handle_upload(req: Request<Body>, target_dir: PathBuf) -> Result<Response<Body>> {
+    // 提前保存 URI 路径
+    let uri_path = req.uri().path().to_string();
+    // 获取 Content-Type 头（返回 Option<HeaderValue>）
+    let content_type = req
+        .headers()
+        .get(hyper::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| anyhow!("Missing Content-Type"))?;
+
+    let boundary =
+        parse_boundary(content_type).map_err(|e| anyhow!("解析 boundary 失败: {}", e))?;
+
+    // 解析multipart
+    let body = req.into_body();
+    let mut multipart = multer::Multipart::new(body, boundary);
+
+    // 处理每个字段
+    while let Some(mut field) = multipart.next_field().await? {
+        let filename = match field.file_name() {
+            Some(f) => f.to_string(),
+            None => continue,
+        };
+
+        // 安全文件名处理
+        let filename = sanitize_filename::sanitize(&filename);
+        let file_path = target_dir.join(&filename);
+
+        // 写入文件
+        let mut file = tokio::fs::File::create(&file_path).await?;
+        while let Some(chunk) = field.chunk().await? {
+            tokio::io::copy(&mut chunk.as_ref(), &mut file).await?;
+        }
+    }
+
+    // 重定向回原目录
+    Ok(Response::builder()
+        .status(StatusCode::SEE_OTHER)
+        .header(hyper::header::LOCATION, uri_path) // 使用 uri_path
+        .body(Body::empty())?)
+}
+
+// 新增删除处理函数
+async fn handle_delete(req: Request<Body>, dir_path: Arc<PathBuf>) -> Result<Response<Body>> {
+    let request_path = req.uri().path();
+    let decoded_path = percent_encoding::percent_decode_str(request_path)
+        .decode_utf8_lossy()
+        .to_string();
+    let full_path = dir_path.join(&decoded_path[1..]);
+
+    // 安全验证
+    let canonical_path = match tokio::fs::canonicalize(&full_path).await {
+        Ok(p) => p,
+        Err(_) => return Ok(not_found_response()),
+    };
+
+    if !canonical_path.starts_with(&*dir_path) {
+        return Ok(Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(Body::empty())?);
+    }
+
+    // 执行删除操作
+    let metadata = tokio::fs::metadata(&canonical_path).await?;
+    let response = if metadata.is_dir() {
+        tokio::fs::remove_dir_all(canonical_path).await?;
+        "目录删除成功"
+    } else {
+        tokio::fs::remove_file(canonical_path).await?;
+        "文件删除成功"
+    };
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::from(response))?)
+}
 
 fn not_found_response() -> Response<Body> {
     Response::builder()
