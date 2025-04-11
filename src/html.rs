@@ -398,9 +398,6 @@ pub async fn handle_directory(path: &Path, request_path: &str) -> Result<Respons
                 .entry-container {
                     padding: 0.75rem;
                 }
-                .size {
-                    display: none;
-                }
                 .upload-section {
                     padding: 1.5rem;
                 }
