@@ -1,11 +1,10 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use async_compression::tokio::bufread::GzipEncoder;
 use futures::future::FutureExt;
 use hyper::header::TRANSFER_ENCODING;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server, StatusCode};
 use mime_guess::from_path;
-use multer::parse_boundary;
 use percent_encoding::{NON_ALPHANUMERIC, percent_encode};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -14,6 +13,7 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 use tokio_util::io::ReaderStream;
 
 mod html;
+mod upload;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -160,49 +160,7 @@ async fn handle_post(req: Request<Body>, dir_path: Arc<PathBuf>) -> Result<Respo
             .body(Body::empty())?);
     }
 
-    handle_upload(req, canonical_path).await
-}
-
-async fn handle_upload(req: Request<Body>, target_dir: PathBuf) -> Result<Response<Body>> {
-    // 提前保存 URI 路径
-    let uri_path = req.uri().path().to_string();
-    // 获取 Content-Type 头（返回 Option<HeaderValue>）
-    let content_type = req
-        .headers()
-        .get(hyper::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| anyhow!("Missing Content-Type"))?;
-
-    let boundary =
-        parse_boundary(content_type).map_err(|e| anyhow!("解析 boundary 失败: {}", e))?;
-
-    // 解析multipart
-    let body = req.into_body();
-    let mut multipart = multer::Multipart::new(body, boundary);
-
-    // 处理每个字段
-    while let Some(mut field) = multipart.next_field().await? {
-        let filename = match field.file_name() {
-            Some(f) => f.to_string(),
-            None => continue,
-        };
-
-        // 安全文件名处理
-        let filename = sanitize_filename::sanitize(&filename);
-        let file_path = target_dir.join(&filename);
-
-        // 写入文件
-        let mut file = tokio::fs::File::create(&file_path).await?;
-        while let Some(chunk) = field.chunk().await? {
-            tokio::io::copy(&mut chunk.as_ref(), &mut file).await?;
-        }
-    }
-
-    // 重定向回原目录
-    Ok(Response::builder()
-        .status(StatusCode::SEE_OTHER)
-        .header(hyper::header::LOCATION, uri_path) // 使用 uri_path
-        .body(Body::empty())?)
+    upload::handle_upload(req, canonical_path).await
 }
 
 // 新增删除处理函数
