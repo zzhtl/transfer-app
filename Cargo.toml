@@ -16,3 +16,6 @@ multer = "2.1.0"
 sanitize-filename = "0.4"
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 memmap2 = "0.9.5"
+
+[dev-dependencies]
+tempfile = "3.8.0"
