@@ -26,7 +26,7 @@ pub async fn handle_upload(req: Request<Body>, target_dir: PathBuf) -> Result<Re
         let file_path = target_dir.join(&filename);
 
         // 使用 spawn_blocking 处理同步文件操作
-        let (mut file, mut cursor) = tokio::task::spawn_blocking({
+        let (file, mut cursor) = tokio::task::spawn_blocking({
             let file_path = file_path.clone();
             move || -> Result<(std::fs::File, u64)> {
                 let file = OpenOptions::new()
@@ -46,7 +46,7 @@ pub async fn handle_upload(req: Request<Body>, target_dir: PathBuf) -> Result<Re
 
             // 扩展文件并重新映射内存
             let mut mmap = tokio::task::spawn_blocking({
-                let mut file = file.try_clone()?;
+                let file = file.try_clone()?;
                 move || {
                     file.set_len(new_cursor)?;
                     unsafe { MmapMut::map_mut(&file) }
@@ -82,7 +82,6 @@ pub async fn handle_upload(req: Request<Body>, target_dir: PathBuf) -> Result<Re
 mod tests {
     use super::*;
     use hyper::{header, HeaderMap, StatusCode};
-    use multer::Multipart;
     use std::io::Write;
     use tempfile::tempdir;
     use tokio::fs;
