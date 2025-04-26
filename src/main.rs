@@ -12,8 +12,17 @@ mod download;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 1. 设置文件夹路径和服务器地址
-    let dir_path = "/Users/zcl/r1/未命名文件夹/2/1";
+    // 1. 读取 --path 参数设置文件夹路径
+    let args: Vec<String> = std::env::args().collect();
+    let dir_path = if let Some(pos) = args.iter().position(|s| s == "path") {
+        args.get(pos + 1).unwrap_or_else(|| {
+            eprintln!("Usage: {} -- path <DIR_PATH>", args[0]);
+            std::process::exit(1);
+        })
+    } else {
+        eprintln!("Usage: {} -- path <DIR_PATH>", args[0]);
+        std::process::exit(1);
+    };
     let canonical_dir = std::fs::canonicalize(dir_path)?; // 规范化为绝对路径
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
 

@@ -85,17 +85,10 @@ cargo build --release
 
 ### 配置与运行
 
-修改`main.rs`中的文件夹路径为您要共享的路径：
-
-```rust
-// 修改这一行为你要共享的文件夹路径
-let dir_path = "/path/to/your/shared/folder";
-```
-
 运行服务：
 
 ```bash
-cargo run --release
+cargo run --release -- path /Volumns/ZCL
 ```
 
 服务启动后，终端会显示访问地址，例如：

@@ -59,7 +59,7 @@ pub async fn handle_get(req: Request<Body>, dir_path: Arc<PathBuf>) -> Result<Re
 
     // 处理目录请求
     if tokio::fs::metadata(&canonical_path).await?.is_dir() {
-        return html::handle_directory(&canonical_path, request_path).await;
+        return html::handle_directory(&canonical_path, &decoded_path).await;
     }
 
     // 处理文件请求
