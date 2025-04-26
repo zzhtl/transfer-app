@@ -88,7 +88,7 @@ cargo build --release
 运行服务：
 
 ```bash
-cargo run --release -- path /Volumns/ZCL
+cargo run --release -- path /Volumes/ZCL
 ```
 
 服务启动后，终端会显示访问地址，例如：
