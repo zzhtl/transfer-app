@@ -1,24 +1,90 @@
 [package]
 name = "transfer-app"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
+rust-version = "1.82"
+description = "High-performance LAN file transfer server with resumable uploads"
+
+[features]
+default = ["tls"]
+tls = ["dep:rustls", "dep:rustls-pemfile", "dep:tokio-rustls"]
 
 [dependencies]
-hyper = { version = "0.14", features = ["full"] }
-tokio = { version = "1.0", features = ["full"] }
-anyhow = "1.0"
-mime_guess = "2.0"
-futures = "0.3"
-tokio-util = { version = "0.7", features = ["codec"] }
-html-escape = "0.2.13"
-percent-encoding = "2.3"
-multer = "2.1.0"
-sanitize-filename = "0.4"
-async-compression = { version = "0.4", features = ["tokio", "gzip"] }
-memmap2 = "0.9.5"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-uuid = { version = "1.0", features = ["v4"] }
+# HTTP 栈
+axum = { version = "0.8", features = ["macros", "http2", "multipart", "tracing"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = { version = "0.5", features = ["util", "timeout", "limit"] }
+tower-http = { version = "0.6", features = [
+    "trace", "cors", "compression-gzip", "compression-br",
+    "set-header", "request-id", "timeout", "catch-panic", "normalize-path",
+] }
+hyper = { version = "1", features = ["http1", "http2", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "http1", "http2"] }
+
+# 异步运行时
+tokio = { version = "1", features = ["full", "parking_lot"] }
+tokio-util = { version = "0.7", features = ["io", "codec", "rt", "compat"] }
+tokio-stream = "0.1"
+futures-util = { version = "0.3", features = ["io"] }
+bytes = "1"
+pin-project-lite = "0.2"
+
+# TLS
+rustls = { version = "0.23", optional = true }
+rustls-pemfile = { version = "2", optional = true }
+tokio-rustls = { version = "0.26", optional = true }
+
+# 序列化 / 配置 / CLI
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+humansize = "2"
+
+# 错误 + 日志
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "ansi"] }
+tracing-appender = "0.2"
+
+# 静态资源嵌入
+rust-embed = { version = "8", features = ["compression"] }
+mime_guess = "2"
+
+# 文件 / 路径
+percent-encoding = "2"
+sanitize-filename = "0.5"
+walkdir = "2"
+dunce = "1"
+html-escape = "0.2"
+
+# Upload
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+
+# ZIP 流式打包
+async_zip = { version = "0.0.17", default-features = false, features = ["tokio", "deflate", "tokio-fs"] }
+
+# 预览
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+encoding_rs = "0.8"
+content_inspector = "0.2"
+
+# 工具
+uuid = { version = "1", features = ["v4", "fast-rng"] }
+parking_lot = "0.12"
+time = { version = "0.3", features = ["formatting", "serde"] }
 
 [dev-dependencies]
-tempfile = "3.8.0"
+tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

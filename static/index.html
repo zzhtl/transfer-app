@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#f8f9fc">
+    <title>FileTransfer</title>
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/layout.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📁</text></svg>">
+</head>
+<body>
+    <div id="app" class="app">
+        <!-- 顶栏 -->
+        <header class="topbar glass">
+            <div class="topbar-left">
+                <h1 class="topbar-title">FileTransfer</h1>
+            </div>
+            <div class="topbar-right">
+                <button id="theme-toggle" class="icon-btn" title="切换主题"></button>
+            </div>
+        </header>
+
+        <!-- 面包屑 -->
+        <nav id="breadcrumb" class="breadcrumb"></nav>
+
+        <!-- 工具栏 -->
+        <div id="toolbar" class="toolbar">
+            <div class="toolbar-left">
+                <div class="search-box">
+                    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                    </svg>
+                    <input class="search-input" type="text" placeholder="搜索文件...">
+                </div>
+                <div class="sort-group">
+                    <button class="sort-btn" data-sort="name">名称</button>
+                    <button class="sort-btn" data-sort="size">大小</button>
+                    <button class="sort-btn" data-sort="modified">修改时间</button>
+                </div>
+            </div>
+            <div class="toolbar-right">
+                <span class="selected-count"></span>
+                <button class="btn btn-sm batch-action btn-zip" style="display:none" title="打包下载">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </button>
+                <button class="btn btn-sm batch-action btn-delete" style="display:none" title="删除">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                </button>
+                <div class="toolbar-divider"></div>
+                <button class="btn btn-sm btn-mkdir" title="新建文件夹">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2v11z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+                </button>
+                <button class="btn btn-primary btn-sm btn-upload" title="上传">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <span>上传</span>
+                </button>
+                <button class="btn btn-sm btn-view-toggle" title="切换视图">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- 文件列表 -->
+        <main id="file-list" class="file-list"></main>
+
+        <!-- 上传面板 -->
+        <div id="upload-panel" class="upload-panel glass">
+            <div class="upload-panel-header">
+                <h3>上传文件</h3>
+                <button class="icon-btn upload-panel-close">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="upload-panel-actions">
+                <button class="btn btn-sm btn-select-files">选择文件</button>
+                <button class="btn btn-sm btn-select-folder">选择文件夹</button>
+            </div>
+            <div class="upload-list"></div>
+        </div>
+
+        <!-- 拖拽覆盖层 -->
+        <div id="drop-overlay" class="drop-overlay">
+            <div class="drop-overlay-content">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <p>释放以上传文件</p>
+            </div>
+        </div>
+
+        <!-- 预览模态框 -->
+        <div id="preview-modal" class="preview-modal">
+            <div class="preview-modal-inner glass">
+                <div class="preview-header">
+                    <span class="preview-title"></span>
+                    <div class="preview-header-actions">
+                        <button class="icon-btn preview-download" title="下载">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        </button>
+                        <button class="icon-btn preview-close" title="关闭">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="preview-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 移动端浮动上传按钮 -->
+    <button class="btn-upload-float" id="upload-float" title="上传">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+    </button>
+
+    <!-- tus-js-client（延迟加载） -->
+    <script src="/static/vendor/tus.min.js" defer></script>
+    <!-- 应用入口 -->
+    <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>
