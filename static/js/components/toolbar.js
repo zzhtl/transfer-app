@@ -3,9 +3,24 @@
  */
 
 import { state, subscribe } from '../store.js';
-import { toggleSort, searchFiles, createFolder, deleteSelected, downloadSelectedAsZip } from '../actions.js';
+import { toggleSort, searchFiles, createFolder, deleteSelected, downloadSelectedAsZip, refresh } from '../actions.js';
+import { saveFile } from '../api.js';
+import { openFileEditor } from './preview-modal.js';
+import { showToast } from './toast.js';
 
 let searchTimer = null;
+
+/** 新建空文件并立即打开编辑器 */
+async function createNewFile(name) {
+    const path = state.currentPath ? `${state.currentPath}/${name}` : name;
+    try {
+        await saveFile(path, '');
+        await refresh();
+        openFileEditor({ name, path, is_dir: false });
+    } catch (e) {
+        showToast(`新建失败: ${e.message}`, 'error');
+    }
+}
 
 export function initToolbar() {
     const toolbar = document.getElementById('toolbar');
@@ -39,6 +54,15 @@ export function initToolbar() {
         mkdirBtn.addEventListener('click', () => {
             const name = prompt('文件夹名称:');
             if (name && name.trim()) createFolder(name.trim());
+        });
+    }
+
+    // 新建文件
+    const newFileBtn = toolbar.querySelector('.btn-newfile');
+    if (newFileBtn) {
+        newFileBtn.addEventListener('click', () => {
+            const name = prompt('文件名:');
+            if (name && name.trim()) createNewFile(name.trim());
         });
     }
 

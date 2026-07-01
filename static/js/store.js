@@ -82,6 +82,8 @@ const raw = {
     contextMenu: null,
     /** 视图模式: list | grid */
     viewMode: localStorage.getItem('viewMode') || 'list',
+    /** 是否需要登录（会话失效或未登录时置 true） */
+    authRequired: false,
 };
 
 export const state = createReactive(raw);

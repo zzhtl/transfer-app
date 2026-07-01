@@ -20,9 +20,9 @@ export function navigate(path) {
 
 /** 初始化路由监听 */
 export function initRouter() {
-    const handler = () => {
+    const handler = (force) => {
         const path = hashToPath();
-        if (state.currentPath !== path) {
+        if (force || state.currentPath !== path) {
             state.currentPath = path;
             state.selected = [];
             state.searchResults = null;
@@ -30,7 +30,7 @@ export function initRouter() {
             loadFiles(path);
         }
     };
-    window.addEventListener('hashchange', handler);
-    // 首次加载
-    handler();
+    window.addEventListener('hashchange', () => handler(false));
+    // 首次强制加载（根目录 hash 为空，currentPath 初值也为空，需强制触发）
+    handler(true);
 }

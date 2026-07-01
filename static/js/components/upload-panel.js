@@ -6,6 +6,9 @@
 import { state, subscribe, getRaw } from '../store.js';
 import { refresh } from '../actions.js';
 import { showToast } from './toast.js';
+import { formatSize } from '../utils/format.js';
+
+const MAX_CONCURRENT = 3;
 
 let panelEl = null;
 let listEl = null;
@@ -101,15 +104,31 @@ function addFiles(fileList) {
             relativePath: file.webkitRelativePath || '',
             progress: 0,
             speed: 0,
+            eta: null,
+            lastTime: null,
+            lastBytes: 0,
             status: 'pending', // pending | uploading | paused | done | error
             tusUpload: null,
             error: null,
         };
         uploads.push(entry);
-        startUpload(entry);
     }
 
     state.uploads = uploads;
+    pump();
+}
+
+/** 并发调度：最多同时上传 MAX_CONCURRENT 个，其余排队 */
+function pump() {
+    const raw = getRaw();
+    let active = raw.uploads.filter(u => u.status === 'uploading').length;
+    for (const u of raw.uploads) {
+        if (active >= MAX_CONCURRENT) break;
+        if (u.status === 'pending') {
+            startUpload(u);
+            active++;
+        }
+    }
 }
 
 /** 使用 tus 协议上传单个文件 */
@@ -140,26 +159,41 @@ function startUpload(entry) {
         removeFingerprintOnSuccess: true,
 
         onProgress: (bytesUploaded, bytesTotal) => {
+            const now = Date.now();
+            if (entry.lastTime != null && now > entry.lastTime) {
+                const dt = (now - entry.lastTime) / 1000;
+                const db = bytesUploaded - entry.lastBytes;
+                if (db >= 0) entry.speed = db / dt;
+            }
+            entry.lastTime = now;
+            entry.lastBytes = bytesUploaded;
             entry.progress = Math.round((bytesUploaded / bytesTotal) * 100);
+            entry.eta = entry.speed > 0 ? Math.round((bytesTotal - bytesUploaded) / entry.speed) : null;
             entry.status = 'uploading';
             updateEntry(entry);
         },
         onSuccess: () => {
             entry.progress = 100;
+            entry.speed = 0;
+            entry.eta = null;
             entry.status = 'done';
             updateEntry(entry);
             showToast(`${entry.name} 上传完成`, 'success');
             refresh();
+            pump();
         },
         onError: (error) => {
             entry.status = 'error';
             entry.error = error.message || '上传失败';
             updateEntry(entry);
             showToast(`${entry.name} 上传失败`, 'error');
+            pump();
         },
     });
 
     entry.tusUpload = upload;
+    entry.status = 'uploading';
+    updateEntry(entry);
 
     // 尝试恢复之前的上传
     upload.findPreviousUploads().then(prev => {
@@ -167,9 +201,7 @@ function startUpload(entry) {
             upload.resumeFromPreviousUpload(prev[0]);
         }
         upload.start();
-        entry.status = 'uploading';
-        updateEntry(entry);
-    });
+    }).catch(() => upload.start());
 }
 
 /** 更新上传条目状态 */
@@ -186,7 +218,10 @@ export function pauseUpload(id) {
     if (entry?.tusUpload) {
         entry.tusUpload.abort();
         entry.status = 'paused';
+        entry.speed = 0;
+        entry.eta = null;
         updateEntry(entry);
+        pump();
     }
 }
 
@@ -209,6 +244,7 @@ export function cancelUpload(id) {
         entry.tusUpload.abort(true);
     }
     state.uploads = raw.uploads.filter(u => u.id !== id);
+    pump();
 }
 
 /** 渲染上传列表 */
@@ -238,6 +274,10 @@ function renderList() {
             actions.push(`<button class="upload-action" data-action="cancel" data-id="${u.id}">取消</button>`);
         }
 
+        const meta = u.status === 'uploading'
+            ? `${formatSize(u.speed)}/s${u.eta != null ? ' · 剩余 ' + formatEta(u.eta) : ''}`
+            : (u.status === 'error' ? (u.error || '上传失败') : '');
+
         return `<div class="upload-item ${u.status}">
             <div class="upload-item-info">
                 <span class="upload-item-name" title="${escapeAttr(u.name)}">${escapeHtml(u.name)}</span>
@@ -246,7 +286,10 @@ function renderList() {
             <div class="upload-item-progress">
                 <div class="upload-item-bar" style="width:${u.progress}%"></div>
             </div>
-            <div class="upload-item-actions">${actions.join('')}</div>
+            <div class="upload-item-meta">
+                <span>${escapeHtml(meta)}</span>
+                <span class="upload-item-actions">${actions.join('')}</span>
+            </div>
         </div>`;
     }).join('');
 
@@ -260,6 +303,16 @@ function renderList() {
             else if (action === 'cancel') cancelUpload(id);
         });
     });
+}
+
+function formatEta(s) {
+    if (s == null || !isFinite(s)) return '';
+    if (s < 60) return `${Math.round(s)}秒`;
+    const m = Math.floor(s / 60);
+    const sec = Math.round(s % 60);
+    if (m < 60) return `${m}分${sec}秒`;
+    const h = Math.floor(m / 60);
+    return `${h}时${m % 60}分`;
 }
 
 function escapeHtml(text) {

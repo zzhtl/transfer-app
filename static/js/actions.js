@@ -62,6 +62,42 @@ export async function deleteSelected() {
     }
 }
 
+/** 移动选中项到目标目录 */
+export async function moveSelected(destDir) {
+    const raw = getRaw();
+    const paths = [...raw.selected];
+    if (!paths.length) return;
+    try {
+        for (const p of paths) {
+            await api.moveEntry(p, destDir);
+        }
+        showToast(`已移动 ${paths.length} 个项目`);
+        state.selected = [];
+        await refresh();
+    } catch (e) {
+        showToast(`移动失败: ${e.message}`, 'error');
+        await refresh();
+    }
+}
+
+/** 复制选中项到目标目录 */
+export async function copySelected(destDir) {
+    const raw = getRaw();
+    const paths = [...raw.selected];
+    if (!paths.length) return;
+    try {
+        for (const p of paths) {
+            await api.copyEntry(p, destDir);
+        }
+        showToast(`已复制 ${paths.length} 个项目`);
+        state.selected = [];
+        await refresh();
+    } catch (e) {
+        showToast(`复制失败: ${e.message}`, 'error');
+        await refresh();
+    }
+}
+
 /** 下载文件 */
 export function downloadFile(path) {
     const url = api.downloadUrl(path, true);

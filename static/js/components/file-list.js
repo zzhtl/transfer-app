@@ -26,8 +26,15 @@ export function initFileList() {
     subscribe('sortAsc', render);
     subscribe('viewMode', render);
     subscribe('loading', render);
+    subscribe('searchResults', render);
 
     render();
+}
+
+/** 当前生效的列表：搜索结果优先，否则当前目录 */
+function activeFiles() {
+    const raw = getRaw();
+    return raw.searchResults !== null ? raw.searchResults : raw.files;
 }
 
 function render() {
@@ -41,22 +48,35 @@ function render() {
         return;
     }
 
-    const files = getSortedFiles();
     const raw = getRaw();
+    const searchMode = raw.searchResults !== null;
+    const files = searchMode ? raw.searchResults : getSortedFiles();
     const selected = new Set(raw.selected);
-    const isGrid = state.viewMode === 'grid';
+    const isGrid = state.viewMode === 'grid' && !searchMode;
 
     listEl.className = `file-list ${isGrid ? 'file-list-grid' : ''}`;
 
     if (!files.length) {
+        const msg = searchMode ? '没有匹配的文件' : '此文件夹为空';
         listEl.innerHTML = `<div class="empty-state">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="1.5">
                 <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2v11z"/>
             </svg>
-            <p>此文件夹为空</p>
+            <p>${msg}</p>
         </div>`;
         return;
     }
+
+    const hint = searchMode ? `<div class="search-hint">搜索到 ${files.length} 个结果</div>` : '';
+
+    // 列表模式（非网格、非搜索）顶部渲染列头，与行使用相同的单元格类名以严格对齐
+    const header = (!isGrid && !searchMode) ? `<div class="file-list-header">
+        <div class="file-cell file-cell-check"></div>
+        <div class="file-cell file-cell-icon"></div>
+        <div class="file-cell file-cell-name">名称</div>
+        <div class="file-cell file-cell-size">大小</div>
+        <div class="file-cell file-cell-time">修改时间</div>
+    </div>` : '';
 
     const html = files.map(f => {
         const isSelected = selected.has(f.path);
@@ -65,6 +85,18 @@ function render() {
             f.is_dir ? 'is-dir' : 'is-file',
             isSelected ? 'selected' : ''
         ].filter(Boolean).join(' ');
+
+        if (searchMode) {
+            const dir = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '/';
+            return `<div class="${cls}" data-path="${escapeAttr(f.path)}" data-dir="${f.is_dir}">
+                <div class="file-cell file-cell-check">
+                    <input type="checkbox" ${isSelected ? 'checked' : ''} tabindex="-1">
+                </div>
+                <div class="file-cell file-cell-icon">${fileIcon(f)}</div>
+                <div class="file-cell file-cell-name" title="${escapeAttr(f.name)}">${escapeHtml(f.name)}</div>
+                <div class="file-cell file-cell-path" title="${escapeAttr(dir)}">${escapeHtml(dir)}</div>
+            </div>`;
+        }
 
         if (isGrid) {
             return `<div class="${cls}" data-path="${escapeAttr(f.path)}" data-dir="${f.is_dir}">
@@ -84,7 +116,7 @@ function render() {
         </div>`;
     }).join('');
 
-    listEl.innerHTML = html;
+    listEl.innerHTML = hint + header + html;
 }
 
 function handleClick(e) {
@@ -104,9 +136,8 @@ function handleDblClick(e) {
     if (isDir) {
         navigate(path);
     } else {
-        // 文件双击 → 预览
-        const raw = getRaw();
-        const file = raw.files.find(f => f.path === path);
+        // 文件双击 → 预览（搜索结果也可预览）
+        const file = activeFiles().find(f => f.path === path);
         if (file) openPreview(file);
     }
 }

@@ -4,11 +4,14 @@
  */
 
 import { state, subscribe } from '../store.js';
-import { closePreview } from '../actions.js';
-import { previewUrl, downloadUrl } from '../api.js';
+import { closePreview, refresh } from '../actions.js';
+import { previewUrl, downloadUrl, getContent, saveFile, renderMarkdown } from '../api.js';
+import { showToast } from './toast.js';
 
 let modalEl = null;
 let contentEl = null;
+let editing = false;
+let autoEditNext = false;
 
 export function initPreviewModal() {
     modalEl = document.getElementById('preview-modal');
@@ -18,6 +21,9 @@ export function initPreviewModal() {
 
     // 关闭按钮
     modalEl.querySelector('.preview-close')?.addEventListener('click', closePreview);
+
+    // 编辑按钮
+    modalEl.querySelector('.preview-edit')?.addEventListener('click', enterEditMode);
 
     // 背景点击关闭
     modalEl.addEventListener('click', (e) => {
@@ -51,8 +57,19 @@ async function render() {
     }
 
     modalEl.classList.add('open');
+    editing = false;
     const titleEl = modalEl.querySelector('.preview-title');
     if (titleEl) titleEl.textContent = file.name;
+
+    const editBtn = modalEl.querySelector('.preview-edit');
+    if (editBtn) editBtn.style.display = isEditable(file) ? '' : 'none';
+
+    // 新建文件：直接进入编辑器，跳过只读渲染（避免竞态）
+    if (autoEditNext) {
+        autoEditNext = false;
+        enterEditMode();
+        return;
+    }
 
     const mime = file.mime_type || guessMime(file.name);
     const url = previewUrl(file.path);
@@ -95,6 +112,94 @@ async function render() {
             a.click();
         });
     }
+}
+
+function isEditable(file) {
+    const mime = file.mime_type || guessMime(file.name);
+    return mime.startsWith('text/') || isTextLike(file.name);
+}
+
+/** 进入编辑模式：拉取完整内容 → 渲染编辑器（markdown 带实时预览） */
+async function enterEditMode() {
+    const file = state.preview;
+    if (!file) return;
+    editing = true;
+    const editBtn = modalEl.querySelector('.preview-edit');
+    if (editBtn) editBtn.style.display = 'none';
+    contentEl.innerHTML = '<div class="editor-loading">加载中...</div>';
+
+    let text = '';
+    try {
+        text = await getContent(file.path);
+    } catch (e) {
+        showToast(`无法编辑: ${e.message}`, 'error');
+        editing = false;
+        render();
+        return;
+    }
+
+    const isMd = /\.(md|markdown)$/i.test(file.name);
+    contentEl.innerHTML = `
+        <div class="editor-wrap">
+            <div class="editor ${isMd ? 'editor-split' : ''}">
+                <textarea class="editor-textarea" spellcheck="false"></textarea>
+                ${isMd ? '<div class="editor-preview preview-markdown"></div>' : ''}
+            </div>
+            <div class="editor-actions">
+                <span class="editor-status"></span>
+                <button class="btn btn-ghost btn-sm editor-cancel">取消</button>
+                <button class="btn btn-primary btn-sm editor-save">保存</button>
+            </div>
+        </div>`;
+
+    const ta = contentEl.querySelector('.editor-textarea');
+    ta.value = text;
+    contentEl.querySelector('.editor-cancel').addEventListener('click', () => {
+        editing = false;
+        render();
+    });
+    contentEl.querySelector('.editor-save').addEventListener('click', doSave);
+
+    if (isMd) {
+        const preview = contentEl.querySelector('.editor-preview');
+        let timer;
+        const update = async () => {
+            try { preview.innerHTML = await renderMarkdown(ta.value); } catch { /* ignore */ }
+        };
+        ta.addEventListener('input', () => {
+            clearTimeout(timer);
+            timer = setTimeout(update, 400);
+        });
+        update();
+    }
+    ta.focus();
+}
+
+async function doSave() {
+    const file = state.preview;
+    if (!file) return;
+    const ta = contentEl.querySelector('.editor-textarea');
+    const statusEl = contentEl.querySelector('.editor-status');
+    const btn = contentEl.querySelector('.editor-save');
+    btn.disabled = true;
+    if (statusEl) statusEl.textContent = '保存中...';
+    try {
+        await saveFile(file.path, ta.value);
+        if (statusEl) statusEl.textContent = '已保存';
+        showToast('已保存', 'success');
+        refresh();
+    } catch (e) {
+        if (statusEl) statusEl.textContent = '';
+        showToast(`保存失败: ${e.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+/** 直接以编辑模式打开文件（新建文件后立即编辑） */
+export function openFileEditor(file) {
+    autoEditNext = true;
+    state.preview = file;
 }
 
 function guessMime(name) {

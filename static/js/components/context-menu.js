@@ -3,9 +3,11 @@
  */
 
 import { state, subscribe, getRaw } from '../store.js';
-import { renameEntry, deleteSelected, downloadFile, downloadSelectedAsZip, openPreview } from '../actions.js';
+import { renameEntry, deleteSelected, downloadFile, downloadSelectedAsZip, openPreview, moveSelected, copySelected } from '../actions.js';
 import { downloadUrl } from '../api.js';
 import { navigate } from '../router.js';
+import { pickFolder } from './folder-picker.js';
+import { openShareModal } from './share-modal.js';
 
 let menuEl = null;
 
@@ -37,9 +39,10 @@ function render() {
     }
 
     const raw = getRaw();
+    const list = raw.searchResults !== null ? raw.searchResults : raw.files;
     const paths = raw.selected;
     const single = paths.length === 1;
-    const file = single ? raw.files.find(f => f.path === paths[0]) : null;
+    const file = single ? list.find(f => f.path === paths[0]) : null;
     const isDir = file?.is_dir;
 
     let items = [];
@@ -54,7 +57,12 @@ function render() {
     if (paths.length > 1) {
         items.push({ action: 'zip', label: '打包下载', icon: 'archive' });
     }
+    if (single) {
+        items.push({ action: 'share', label: '分享…', icon: 'share' });
+    }
     items.push({ divider: true });
+    items.push({ action: 'move', label: '移动到…', icon: 'move' });
+    items.push({ action: 'copy', label: '复制到…', icon: 'copy' });
     if (single) {
         items.push({ action: 'rename', label: '重命名', icon: 'edit' });
     }
@@ -76,14 +84,15 @@ function render() {
     menuEl.style.top = `${Math.min(y, maxY)}px`;
 }
 
-function handleAction(e) {
+async function handleAction(e) {
     const item = e.target.closest('[data-action]');
     if (!item) return;
 
     const action = item.dataset.action;
     const raw = getRaw();
+    const list = raw.searchResults !== null ? raw.searchResults : raw.files;
     const paths = [...raw.selected];
-    const file = raw.files.find(f => f.path === paths[0]);
+    const file = list.find(f => f.path === paths[0]);
 
     state.contextMenu = null;
 
@@ -100,6 +109,19 @@ function handleAction(e) {
         case 'zip':
             downloadSelectedAsZip();
             break;
+        case 'share':
+            if (paths[0]) openShareModal(paths[0]);
+            break;
+        case 'move': {
+            const dest = await pickFolder({ title: '移动到', confirmLabel: '移动到此文件夹', initialPath: state.currentPath });
+            if (dest !== null) moveSelected(dest);
+            break;
+        }
+        case 'copy': {
+            const dest = await pickFolder({ title: '复制到', confirmLabel: '复制到此文件夹', initialPath: state.currentPath });
+            if (dest !== null) copySelected(dest);
+            break;
+        }
         case 'rename': {
             if (!file) break;
             const newName = prompt('新名称:', file.name);
