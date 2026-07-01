@@ -53,15 +53,19 @@ export function fileIcon(file) {
 }
 
 function extColor(ext) {
+    // 克制配色：仅少数大类保留低饱和度点缀色，其余一律中性灰
+    const CODE = '#5b8def', IMAGE = '#c678a4', VIDEO = '#9a7bd0',
+        AUDIO = '#4fa8a0', ARCHIVE = '#c99a4e', PDF = '#d16a6a';
     const colors = {
-        js: '#f7df1e', ts: '#3178c6', rs: '#dea584', go: '#00add8',
-        py: '#3776ab', java: '#ed8b00', c: '#555', cpp: '#659bd3',
-        html: '#e34c26', css: '#1572b6', json: '#5b5b5b',
-        md: '#083fa1', txt: 'var(--text-tertiary)',
-        png: '#f472b6', jpg: '#f472b6', gif: '#f472b6', webp: '#f472b6', svg: '#f472b6',
-        mp4: '#a855f7', mkv: '#a855f7', avi: '#a855f7', webm: '#a855f7',
-        mp3: '#22c55e', wav: '#22c55e', flac: '#22c55e',
-        pdf: '#ef4444', zip: '#eab308', tar: '#eab308', gz: '#eab308',
+        js: CODE, ts: CODE, jsx: CODE, tsx: CODE, rs: CODE, go: CODE,
+        py: CODE, java: CODE, c: CODE, cpp: CODE, h: CODE, hpp: CODE,
+        html: CODE, css: CODE, json: CODE, xml: CODE, yml: CODE, yaml: CODE,
+        toml: CODE, sh: CODE, rb: CODE, php: CODE, sql: CODE,
+        png: IMAGE, jpg: IMAGE, jpeg: IMAGE, gif: IMAGE, webp: IMAGE, svg: IMAGE, bmp: IMAGE, ico: IMAGE,
+        mp4: VIDEO, mkv: VIDEO, avi: VIDEO, webm: VIDEO, mov: VIDEO, flv: VIDEO,
+        mp3: AUDIO, wav: AUDIO, flac: AUDIO, aac: AUDIO, ogg: AUDIO, m4a: AUDIO,
+        pdf: PDF,
+        zip: ARCHIVE, tar: ARCHIVE, gz: ARCHIVE, rar: ARCHIVE, '7z': ARCHIVE, bz2: ARCHIVE, xz: ARCHIVE,
     };
     return colors[ext] || 'var(--text-tertiary)';
 }
