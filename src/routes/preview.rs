@@ -33,20 +33,18 @@ pub async fn get(
             .unwrap());
     }
 
-    // 文本文件: 限读首 1MB
+    // 文本文件: 限读首 1MB（用 take 避免整文件读入内存）
     if mime.starts_with("text/") || is_code_file(&abs) {
-        let data = tokio::fs::read(&abs).await?;
-        let limited = if data.len() > 1024 * 1024 {
-            &data[..1024 * 1024]
-        } else {
-            &data
-        };
+        use tokio::io::AsyncReadExt;
+        let file = tokio::fs::File::open(&abs).await?;
+        let mut data = Vec::new();
+        file.take(1024 * 1024).read_to_end(&mut data).await?;
 
         // 检测编码
-        let text = if content_inspector::inspect(limited).is_text() {
-            String::from_utf8_lossy(limited).to_string()
+        let text = if content_inspector::inspect(&data).is_text() {
+            String::from_utf8_lossy(&data).to_string()
         } else {
-            let (decoded, _, _) = encoding_rs::UTF_8.decode(limited);
+            let (decoded, _, _) = encoding_rs::UTF_8.decode(&data);
             decoded.to_string()
         };
 
@@ -57,18 +55,37 @@ pub async fn get(
             .unwrap());
     }
 
-    // 其它类型（图片/视频/音频/PDF）: 直接透传，前端处理
+    // 其它类型（图片/视频/音频/PDF）: 流式透传，避免整文件读入内存
     let meta = tokio::fs::metadata(&abs).await?;
     let size = meta.len();
 
-    // 对于需要 Range 的大文件，重定向到 download 端点
+    let file = tokio::fs::File::open(&abs).await?;
+    let stream = tokio_util::io::ReaderStream::new(file);
+
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, &mime)
         .header(CONTENT_LENGTH, size)
         .header("X-Preview-Type", preview_type(&mime))
-        .body(Body::from(tokio::fs::read(&abs).await?))
+        .body(Body::from_stream(stream))
         .unwrap())
+}
+
+#[derive(serde::Deserialize)]
+pub struct MarkdownReq {
+    pub content: String,
+}
+
+/// POST /api/preview/markdown — 渲染 markdown 片段（编辑实时预览用，不含文档包装/样式）
+pub async fn render_md(axum::Json(req): axum::Json<MarkdownReq>) -> Response<Body> {
+    let mut html = String::new();
+    let parser = pulldown_cmark::Parser::new(&req.content);
+    pulldown_cmark::html::push_html(&mut html, parser);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "text/html; charset=utf-8")
+        .body(Body::from(html))
+        .unwrap()
 }
 
 fn render_markdown(input: &str) -> String {

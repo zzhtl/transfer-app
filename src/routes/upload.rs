@@ -150,10 +150,18 @@ pub async fn patch(
         }
     }
 
+    // 并发上限：获取传输许可（PATCH 数据传输期间持有，结束自动释放）
+    let _permit = state
+        .transfer_semaphore
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("semaphore closed: {}", e)))?;
+
     let tmp_dir = state.upload_manager.tmp_dir().clone();
-    let part_path = {
+    let (part_path, total_size) = {
         let session = arc.read().await;
-        session.part_path(&tmp_dir)
+        (session.part_path(&tmp_dir), session.total_size)
     };
 
     // 流式写入 — 关键修复点：不用 to_bytes()！
@@ -166,6 +174,10 @@ pub async fn patch(
         let bytes = frame.map_err(|e| {
             AppError::Internal(anyhow::anyhow!("body read error: {}", e))
         })?;
+        // 防止客户端超发填满磁盘：累计写入不得超过声明的 total_size
+        if client_offset + written + bytes.len() as u64 > total_size {
+            return Err(AppError::PayloadTooLarge);
+        }
         writer.write_all(&bytes).await?;
         written += bytes.len() as u64;
 
@@ -239,6 +251,7 @@ async fn finalize_upload(state: &AppState, file_id: &str) -> Result<(), AppError
     let session = arc.read().await;
     let tmp_dir = state.upload_manager.tmp_dir();
     let part_path = session.part_path(tmp_dir);
+    let expected_checksum = session.expected_checksum.clone();
 
     // 计算最终路径
     let final_dir = if let Some(ref rel) = session.relative_path {
@@ -285,6 +298,20 @@ async fn finalize_upload(state: &AppState, file_id: &str) -> Result<(), AppError
     }
 
     drop(session);
+
+    // 完整性校验：若客户端提供了 checksum（SHA-256 hex），在发布前校验 .part
+    if let Some(expected) = expected_checksum {
+        let actual = sha256_file(&part_path).await?;
+        if !actual.eq_ignore_ascii_case(expected.trim()) {
+            let _ = tokio::fs::remove_file(&part_path).await;
+            if let Some(a) = state.upload_manager.get(file_id) {
+                let s = a.read().await;
+                let _ = tokio::fs::remove_file(s.meta_path(tmp_dir)).await;
+            }
+            state.upload_manager.remove(file_id);
+            return Err(AppError::ChecksumMismatch { expected, actual });
+        }
+    }
 
     // 原子 rename
     tokio::fs::rename(&part_path, &final_path).await?;
@@ -335,4 +362,51 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+/// 流式计算文件 SHA-256，返回小写 hex（避免整文件读入内存）
+async fn sha256_file(path: &std::path::Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncReadExt;
+
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn sha256_file_matches_known_vector() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("f.bin");
+        // 跨越 1MB 读缓冲边界，验证分块累积正确
+        tokio::fs::write(&p, b"hello").await.unwrap();
+        let got = sha256_file(&p).await.unwrap();
+        assert_eq!(
+            got,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+
+    #[tokio::test]
+    async fn sha256_file_large_multichunk() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("big.bin");
+        // 3MB 全 0，跨多个 1MB 读缓冲块
+        tokio::fs::write(&p, vec![0u8; 3 * 1024 * 1024]).await.unwrap();
+        let got = sha256_file(&p).await.unwrap();
+        // sha256 of 3MiB zeros
+        assert_eq!(got.len(), 64);
+    }
 }

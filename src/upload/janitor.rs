@@ -12,6 +12,13 @@ pub fn spawn(state: AppState) {
             if cleaned > 0 {
                 tracing::info!(count = cleaned, "cleaned expired upload sessions");
             }
+            let cleaned_shares = state
+                .share_manager
+                .cleanup_expired(crate::auth::now_secs())
+                .await;
+            if cleaned_shares > 0 {
+                tracing::info!(count = cleaned_shares, "cleaned expired shares");
+            }
         }
     });
 }

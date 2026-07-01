@@ -39,6 +39,22 @@ pub struct AppConfig {
     #[arg(long, default_value_t = 7 * 24 * 3600)]
     pub upload_expiration_secs: u64,
 
+    /// 站点访问密码 (设置后启用鉴权; 不设则匿名开放)
+    #[arg(long, env = "TRANSFER_AUTH_PASSWORD")]
+    pub auth_password: Option<String>,
+
+    /// 会话有效期 (秒, 默认 7 天)
+    #[arg(long, default_value_t = 7 * 24 * 3600)]
+    pub session_ttl_secs: u64,
+
+    /// 分享链接默认有效期 (秒, 默认 7 天)
+    #[arg(long, default_value_t = 7 * 24 * 3600)]
+    pub share_expiration_default_secs: u64,
+
+    /// 分享链接最大有效期 (秒, 默认 30 天, 防滥用)
+    #[arg(long, default_value_t = 30 * 24 * 3600)]
+    pub share_max_expiration_secs: u64,
+
     /// 配置文件 (TOML)
     #[arg(short = 'c', long, env = "TRANSFER_CONFIG")]
     pub config: Option<PathBuf>,

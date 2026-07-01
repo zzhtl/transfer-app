@@ -19,6 +19,12 @@ pub async fn run(config: AppConfig) -> anyhow::Result<()> {
         tracing::info!(count = recovered, "recovered upload sessions");
     }
 
+    // 恢复未过期的分享
+    let recovered_shares = state.share_manager.boot_recover().await?;
+    if recovered_shares > 0 {
+        tracing::info!(count = recovered_shares, "recovered shares");
+    }
+
     // 启动后台清理任务
     upload::janitor::spawn(state.clone());
 

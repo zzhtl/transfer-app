@@ -1,11 +1,17 @@
+use axum::body::Body;
 use axum::extract::{Query, State};
+use axum::http::header::CONTENT_TYPE;
 use axum::http::StatusCode;
+use axum::response::Response;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::fs::{meta::FileMeta, operations, walker};
 use crate::state::AppState;
+
+/// 在线编辑的文件大小上限（1 MiB，兼顾 axum 默认 2MB body 限制）
+const MAX_EDIT_SIZE: u64 = 1024 * 1024;
 
 #[derive(Deserialize)]
 pub struct ListParams {
@@ -256,4 +262,58 @@ pub async fn search(
     }
 
     Ok(Json(metas))
+}
+
+/// GET /api/files/content?path= — 读取文本文件完整内容（供在线编辑，限 1MiB）
+pub async fn content(
+    State(state): State<AppState>,
+    Query(params): Query<ListParams>,
+) -> Result<Response<Body>, AppError> {
+    let abs = state.path_safety.resolve(&params.path)?;
+    if abs.is_dir() {
+        return Err(AppError::IsADirectory);
+    }
+    let meta = tokio::fs::metadata(&abs).await?;
+    if meta.len() > MAX_EDIT_SIZE {
+        return Err(AppError::BadRequest("file too large to edit".into()));
+    }
+    let data = tokio::fs::read(&abs).await?;
+    if !data.is_empty() && !content_inspector::inspect(&data).is_text() {
+        return Err(AppError::BadRequest("not a text file".into()));
+    }
+    let text = String::from_utf8_lossy(&data).to_string();
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "text/plain; charset=utf-8")
+        .body(Body::from(text))
+        .unwrap())
+}
+
+#[derive(Deserialize)]
+pub struct SaveRequest {
+    pub path: String,
+    pub content: String,
+}
+
+/// POST /api/files/save — 保存文本文件（原子写；新建文件传空内容即可）
+pub async fn save(
+    State(state): State<AppState>,
+    Json(req): Json<SaveRequest>,
+) -> Result<StatusCode, AppError> {
+    if req.content.len() as u64 > MAX_EDIT_SIZE {
+        return Err(AppError::PayloadTooLarge);
+    }
+    let abs = state.path_safety.resolve(&req.path)?;
+    if abs.is_dir() {
+        return Err(AppError::IsADirectory);
+    }
+    let parent = abs
+        .parent()
+        .ok_or_else(|| AppError::BadRequest("no parent directory".into()))?;
+
+    // 原子写：先写临时文件，再 rename（仿 upload finalize）
+    let tmp = parent.join(format!(".{}.savetmp", uuid::Uuid::new_v4().simple()));
+    tokio::fs::write(&tmp, req.content.as_bytes()).await?;
+    tokio::fs::rename(&tmp, &abs).await?;
+    Ok(StatusCode::OK)
 }

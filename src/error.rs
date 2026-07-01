@@ -8,6 +8,9 @@ pub enum AppError {
     #[error("not found: {0}")]
     NotFound(String),
 
+    #[error("unauthorized: {0}")]
+    Unauthorized(&'static str),
+
     #[error("forbidden: {0}")]
     Forbidden(&'static str),
 
@@ -46,6 +49,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code) = match &self {
             Self::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
+            Self::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
             Self::PathTraversal => (StatusCode::FORBIDDEN, "path_traversal"),
             Self::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "too_large"),

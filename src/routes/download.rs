@@ -27,15 +27,24 @@ pub async fn get(
     headers: HeaderMap,
 ) -> Result<Response<Body>, AppError> {
     let abs = state.path_safety.resolve(&rel)?;
+    serve_file(&abs, params.download.is_some(), &headers).await
+}
 
+/// 流式服务单个文件（Range/ETag/304/Content-Disposition）。
+/// 供受保护下载与公开分享下载共用；调用方负责路径安全校验。
+pub async fn serve_file(
+    abs: &std::path::Path,
+    is_download: bool,
+    headers: &HeaderMap,
+) -> Result<Response<Body>, AppError> {
     if abs.is_dir() {
         return Err(AppError::IsADirectory);
     }
 
-    let meta = tokio::fs::metadata(&abs).await?;
+    let meta = tokio::fs::metadata(abs).await?;
     let size = meta.len();
     let etag_val = etag::compute_etag(&meta);
-    let mime_type = guess_mime(&abs);
+    let mime_type = guess_mime(abs);
 
     // 304 Not Modified
     if let Some(inm) = headers.get(IF_NONE_MATCH) {
@@ -66,7 +75,7 @@ pub async fn get(
     let length = if size == 0 { 0 } else { end - start + 1 };
 
     // 完全流式，不缓存到内存
-    let mut file = tokio::fs::File::open(&abs).await?;
+    let mut file = tokio::fs::File::open(abs).await?;
     if start > 0 {
         file.seek(SeekFrom::Start(start)).await?;
     }
@@ -80,7 +89,6 @@ pub async fn get(
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let is_download = params.download.is_some();
     let disposition = if is_download {
         format!("attachment; filename=\"{}\"", filename)
     } else {

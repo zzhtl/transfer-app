@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod config;
 pub mod download;
 pub mod error;
@@ -7,6 +8,7 @@ pub mod observability;
 pub mod preview;
 pub mod routes;
 pub mod server;
+pub mod share;
 pub mod state;
 pub mod upload;
 pub mod util;

@@ -30,27 +30,37 @@ pub async fn get(
         return Err(AppError::BadRequest("no paths specified".into()));
     }
 
-    let root = state.root.clone();
+    let filename = params.name.unwrap_or_else(default_zip_name);
+    Ok(zip_response(entries, state.root.clone(), filename))
+}
+
+/// 默认 zip 文件名 `transfer-<秒>.zip`
+pub fn default_zip_name() -> String {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("transfer-{}.zip", ts)
+}
+
+/// 构造流式 ZIP 响应（后台写、边写边传）。供直接 ZIP 下载与分享 ZIP 共用。
+/// entries 的路径安全由调用方保证。
+pub fn zip_response(
+    entries: Vec<std::path::PathBuf>,
+    root: std::path::PathBuf,
+    filename: String,
+) -> Response<Body> {
     let (writer, reader) = tokio::io::duplex(256 * 1024);
     let reader_stream = tokio_util::io::ReaderStream::new(reader);
     let body = Body::from_stream(reader_stream);
 
-    // 后台写 zip
     tokio::spawn(async move {
         if let Err(e) = write_zip(writer, entries, &root).await {
             tracing::warn!(error = %e, "zip stream failed");
         }
     });
 
-    let filename = params.name.unwrap_or_else(|| {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        format!("transfer-{}.zip", ts)
-    });
-
-    Ok(Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, "application/zip")
         .header(
@@ -58,7 +68,7 @@ pub async fn get(
             format!("attachment; filename=\"{}\"", filename),
         )
         .body(body)
-        .unwrap())
+        .unwrap()
 }
 
 async fn write_zip(
