@@ -2,7 +2,7 @@
 
 `transfer-app` 是一个基于 Rust + Axum 的局域网文件传输与目录管理服务。启动后把一个本地目录映射成带 Web UI 的共享空间，同一网络内的手机、电脑或平板直接用浏览器访问即可，不需要额外客户端。
 
-当前版本的前端资源会直接嵌入二进制，编译后可单文件运行。默认提供 HTTP，传入证书后可切换到 HTTPS。项目更适合受信任内网，或部署在已有反向代理和鉴权之后。
+前端资源直接嵌入二进制，单文件即可运行，无运行时依赖。默认提供 HTTP，传入证书后可切换到 HTTPS；通过 `--auth-password` 可启用站点密码鉴权。项目更适合受信任内网，或部署在已有反向代理之后。
 
 ## 功能概览
 
@@ -13,7 +13,10 @@
 - 单文件下载支持 `HTTP Range`、`ETag` 和断点续传
 - 多文件或目录流式打包为 ZIP 下载，不预先落完整压缩包
 - 在线预览图片、视频、音频、PDF、文本/代码和 Markdown
-- 新建文件夹、重命名、批量删除
+- 新建文件夹、重命名、移动、复制、批量删除
+- 文本文件在线编辑，原子保存
+- 可选站点密码鉴权（`--auth-password`），未设置时保持匿名开放
+- 对文件或目录生成带有效期的公开分享链接，免登录访问，支持撤销
 - 提供健康检查接口和请求日志
 - 可选启用 Rustls TLS
 
@@ -24,30 +27,62 @@
 - 浏览和下载文档、代码、媒体资源
 - 在受信任网络内提供一个轻量文件工作台
 
-## 运行要求
+## 安装
 
-- Rust `1.82+`
-- 现代浏览器
-- 一个可读写的共享目录
+### 方式一：一键安装脚本（Linux / macOS）
 
-## 快速开始
+```bash
+curl -fsSL https://raw.githubusercontent.com/zzhtl/transfer-app/main/install.sh | sh
+```
 
-### 1. 编译
+脚本会自动识别系统和架构，从 [GitHub Releases](https://github.com/zzhtl/transfer-app/releases) 下载对应二进制，校验 `SHA256` 后安装到 `/usr/local/bin`（目录不可写时自动尝试 `sudo`）。
+
+可用环境变量控制安装行为：
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `TRANSFER_VERSION` | `latest` | 安装指定版本，如 `v0.3.0` |
+| `TRANSFER_INSTALL_DIR` | `/usr/local/bin` | 安装目录 |
+
+示例（安装到用户目录，免 `sudo`）：
+
+```bash
+TRANSFER_INSTALL_DIR=$HOME/.local/bin \
+  curl -fsSL https://raw.githubusercontent.com/zzhtl/transfer-app/main/install.sh | sh
+```
+
+### 方式二：手动下载
+
+从 [Releases](https://github.com/zzhtl/transfer-app/releases) 页面下载对应平台的压缩包，每个产物都附带 `.sha256` 校验文件：
+
+| 平台 | 产物 |
+| --- | --- |
+| Linux x86_64 | `transfer-app-x86_64-unknown-linux-musl.tar.gz` |
+| Linux arm64 | `transfer-app-aarch64-unknown-linux-musl.tar.gz` |
+| macOS Intel | `transfer-app-x86_64-apple-darwin.tar.gz` |
+| macOS Apple Silicon | `transfer-app-aarch64-apple-darwin.tar.gz` |
+
+Linux 产物为 musl 静态链接，不依赖 glibc，任意发行版可直接运行。macOS 二进制未签名，浏览器下载后若被 Gatekeeper 拦截，执行 `xattr -d com.apple.quarantine transfer-app` 解除。
+
+### 方式三：源码编译
+
+需要 Rust `1.82+`：
 
 ```bash
 cargo build --release
+# 产物在 target/release/transfer-app
 ```
 
-### 2. 启动服务
+## 快速开始
 
 ```bash
-cargo run --release -- --path /path/to/share
+transfer-app --path /path/to/share
 ```
 
 也可以用环境变量传入共享目录：
 
 ```bash
-TRANSFER_PATH=/path/to/share cargo run --release
+TRANSFER_PATH=/path/to/share transfer-app
 ```
 
 启动后终端会打印本机访问地址，例如：
@@ -65,7 +100,7 @@ Network: http://192.168.1.100:8080
 
 ```bash
 ./tls/gen-cert.sh
-cargo run --release -- \
+transfer-app \
   --path /path/to/share \
   --tls-cert tls/cert.pem \
   --tls-key tls/key.pem
@@ -77,6 +112,32 @@ cargo run --release -- \
 - 自签名证书会触发浏览器告警，属于预期行为
 - 如果要对公网提供服务，建议放到 Nginx、Caddy 等反向代理之后，并自行增加鉴权
 
+## 部署为常驻服务（systemd）
+
+```ini
+# /etc/systemd/system/transfer-app.service
+[Unit]
+Description=transfer-app LAN file transfer server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/transfer-app --path /srv/share --port 8080
+# 启用鉴权时不要把密码写在 ExecStart 里（会出现在进程列表中），
+# 用 EnvironmentFile 传入，文件权限设为 600：
+# EnvironmentFile=/etc/transfer-app.env    # 内容: TRANSFER_AUTH_PASSWORD=...
+# 按需改成对共享目录有读写权限的用户
+User=www-data
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now transfer-app
+```
+
 ## 配置项
 
 | 参数 | 环境变量 | 默认值 | 说明 |
@@ -87,8 +148,12 @@ cargo run --release -- \
 | `--tls-cert` | `TRANSFER_TLS_CERT` | 无 | TLS 证书 PEM |
 | `--tls-key` | `TRANSFER_TLS_KEY` | 无 | TLS 私钥 PEM |
 | `--max-upload-size` | `TRANSFER_MAX_UPLOAD` | `0` | 单文件最大上传字节数，`0` 表示不限制 |
-| `--max-concurrent-transfers` | 无 | `32` | 预留参数，当前版本尚未接入实际并发限流 |
+| `--max-concurrent-transfers` | 无 | `32` | 并发上传传输上限（tus `PATCH` 数据传输期间占用许可） |
 | `--upload-expiration-secs` | 无 | `604800` | 上传会话过期时间，默认 7 天 |
+| `--auth-password` | `TRANSFER_AUTH_PASSWORD` | 无 | 站点访问密码，设置后启用鉴权，不设则匿名开放 |
+| `--session-ttl-secs` | 无 | `604800` | 登录会话有效期，默认 7 天 |
+| `--share-expiration-default-secs` | 无 | `604800` | 分享链接默认有效期，默认 7 天 |
+| `--share-max-expiration-secs` | 无 | `2592000` | 分享链接最大有效期，默认 30 天 |
 | `--log-filter` | `RUST_LOG` | `info,transfer_app=debug` | `tracing` 日志过滤规则 |
 | `--config` | `TRANSFER_CONFIG` | 无 | 预留 TOML 配置入口，当前仍建议优先使用 CLI 或环境变量 |
 
@@ -103,7 +168,7 @@ cargo run --release -- \
 - 名称、大小、修改时间排序
 - 列表视图和网格视图切换
 - 当前目录关键字过滤
-- 右键菜单支持打开、预览、下载、重命名、删除
+- 右键菜单支持打开、预览、下载、打包下载、分享、移动、复制、重命名、删除
 - 上传面板支持文件上传、文件夹上传、拖拽上传、暂停、继续和进度显示
 - 选中多个项目后可批量删除，或打包为 ZIP 下载
 - 移动端提供浮动上传按钮
@@ -119,15 +184,26 @@ cargo run --release -- \
 | `POST` | `/api/files/copy` | 复制文件或目录 |
 | `POST` | `/api/files/delete` | 批量删除 |
 | `GET` | `/api/files/search?q=&path=&limit=` | 服务端按名称搜索 |
+| `GET` | `/api/files/content?path=` | 读取文本文件内容（供在线编辑，限 `1 MiB`） |
+| `POST` | `/api/files/save` | 保存文本文件（原子写） |
 | `OPTIONS`, `POST` | `/api/upload` | tus 能力发现、创建上传会话 |
 | `HEAD`, `PATCH`, `DELETE` | `/api/upload/{file_id}` | 查询进度、续传、取消上传 |
 | `GET` | `/api/download/{path}` | 单文件下载，支持 `Range` / `ETag` |
 | `GET` | `/api/download-zip?paths=a,b,c` | 流式 ZIP 下载 |
 | `GET` | `/api/preview/{path}` | 文件预览 |
+| `POST`, `GET` | `/api/share` | 创建分享链接、列出全部分享 |
+| `DELETE` | `/api/share/{id}` | 撤销分享 |
+| `GET` | `/api/s/{token}` | 分享元信息（免登录） |
+| `GET` | `/api/s/{token}/download` | 分享文件下载（免登录） |
+| `GET` | `/api/s/{token}/zip` | 分享目录打包下载（免登录） |
+| `GET` | `/api/s/{token}/list` | 分享目录列表（免登录） |
+| `POST` | `/api/auth/login` | 登录 |
+| `POST` | `/api/auth/logout` | 退出登录 |
+| `GET` | `/api/auth/status` | 鉴权状态查询 |
 | `GET` | `/api/healthz` | 存活检查 |
 | `GET` | `/api/readyz` | 就绪检查 |
 
-当前前端已经接入浏览、上传、重命名、删除、打包下载和预览。`move`、`copy`、`search` 这类接口也可以用于后续二次集成。
+当前前端已经接入浏览、上传、移动、复制、重命名、删除、打包下载、预览、在线编辑、分享和登录。
 
 ## 预览与下载细节
 
@@ -140,10 +216,11 @@ cargo run --release -- \
 ## 运行时约束
 
 - 所有访问路径都会被限制在共享根目录内，防止目录穿越
-- 程序会在共享目录下创建隐藏目录 `.transfer-tmp`，用于保存上传分片和会话元数据
+- 程序会在共享目录下创建隐藏目录 `.transfer-tmp`，用于保存上传分片、会话元数据和分享记录
 - `.transfer-tmp` 不会出现在文件列表中
 - 启动时会尝试恢复未完成的上传；后台任务会按小时扫描并清理过期上传
-- 当前版本没有内置身份认证，同时 `CORS` 配置较宽松，只建议用于受信任网络
+- 未设置 `--auth-password` 时匿名开放；设置后除登录接口和分享公开链接（`/api/s/`）外均需登录。会话用每进程随机的 HMAC key 签名，服务重启后需要重新登录
+- `CORS` 配置较宽松，只建议用于受信任网络，或放在反向代理之后
 - 前端静态资源通过 `rust-embed` 嵌入二进制，编译后不依赖额外前端构建产物
 
 ## 关键依赖
@@ -179,10 +256,29 @@ cargo test
 
 ## 已知限制
 
-- 暂无内置登录、鉴权和权限隔离
-- `--max-concurrent-transfers` 目前尚未真正生效
+- 鉴权是单密码的站点级方案，没有多用户和细粒度权限隔离
+- `--max-concurrent-transfers` 目前只限制上传传输，下载和打包暂不设并发上限
 - `--config` 仍处于基础实现状态，不适合作为唯一配置来源
-- Web UI 还没有把 `move`、`copy` 暴露成直接操作入口
+
+## 发布流程
+
+发布由 GitHub Actions 完成（`.github/workflows/release.yml`），推送 `v*` 标签自动触发：
+
+```bash
+# 1. 更新 Cargo.toml 中的 version（CI 会校验 tag 与版本号一致）
+# 2. 打标签并推送
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+流水线内容：
+
+1. 运行 `cargo test`，并校验 tag 与 `Cargo.toml` 版本一致
+2. 四个目标平台并行构建：Linux musl 在原生 x86_64 / arm64 runner 上编译，macOS 双架构在 Apple Silicon runner 上编译
+3. 每个产物打成 `tar.gz` 并生成 `.sha256` 校验文件
+4. 自动创建 GitHub Release，附上全部产物和自动生成的 Release Notes
+
+`install.sh` 依赖产物命名 `transfer-app-<target>.tar.gz`（不带版本号），配合 `releases/latest/download/` 直链下载，避免调用 GitHub API 受速率限制影响。
 
 ## 许可
 
