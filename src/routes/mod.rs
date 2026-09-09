@@ -9,17 +9,27 @@ pub mod upload;
 pub mod zipdl;
 
 use axum::Router;
-use tower::ServiceBuilder;
+use tower::{Layer as _, ServiceBuilder};
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
-use tower_http::normalize_path::NormalizePathLayer;
+use tower_http::normalize_path::{NormalizePath, NormalizePathLayer};
 use tower_http::request_id::SetRequestIdLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::middleware::request_id::MakeRequestUuid;
 use crate::middleware::trace::CustomMakeSpan;
 use crate::state::AppState;
+
+/// 对外服务的完整栈：路由树 + 路径归一化。
+///
+/// `NormalizePathLayer` **必须包在 Router 外面**，不能挂进 `Router::layer` 的
+/// ServiceBuilder 里：后者在路由**之后**执行，路径匹配已经定了再去修 URI 就晚了。
+/// 之前挂在里面时 `/api/healthz/` 落到 `.fallback(static_assets::index)` 上，
+/// 返回的是 200 + 前端 HTML 而不是 JSON——因为有 SPA 兜底，这个失效一直看不出来。
+pub fn build_service(state: AppState) -> NormalizePath<Router> {
+    NormalizePathLayer::trim_trailing_slash().layer(build_router(state))
+}
 
 /// 构建完整的路由树
 pub fn build_router(state: AppState) -> Router {
@@ -82,7 +92,6 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
         .layer(
             ServiceBuilder::new()
-                .layer(NormalizePathLayer::trim_trailing_slash())
                 .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
                 .layer(
                     TraceLayer::new_for_http().make_span_with(CustomMakeSpan),
@@ -101,4 +110,77 @@ pub fn build_router(state: AppState) -> Router {
                 ))
                 .layer(CatchPanicLayer::new()),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::{to_bytes, Body};
+    use axum::http::{Request, StatusCode};
+    use clap::Parser as _;
+    use tower::ServiceExt as _;
+
+    fn service(dir: &std::path::Path) -> NormalizePath<Router> {
+        let config = crate::config::AppConfig::parse_from([
+            "transfer-app",
+            "-p",
+            dir.to_str().expect("临时目录路径"),
+        ]);
+        let state: AppState =
+            std::sync::Arc::new(crate::state::AppStateInner::new(config).expect("建 state"));
+        build_service(state)
+    }
+
+    /// `NormalizePathLayer` 挂进 `Router::layer` 的 ServiceBuilder 里是**无效的**：
+    /// 它在路由之后才执行，路径匹配已经定了。之前就是这么挂的，`/api/healthz/`
+    /// 会落到 `.fallback(static_assets::index)` 上，返回 200 + 前端 HTML；
+    /// 因为有 SPA 兜底，状态码还是 200，这个失效一直没被发现。
+    #[tokio::test]
+    async fn trailing_slash_reaches_the_api_handler_not_the_spa_fallback() {
+        let dir = tempfile::tempdir().expect("临时目录");
+
+        for uri in ["/api/healthz", "/api/healthz/"] {
+            let response = service(dir.path())
+                .oneshot(
+                    Request::builder()
+                        .uri(uri)
+                        .body(Body::empty())
+                        .expect("请求"),
+                )
+                .await
+                .expect("响应");
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+
+            let body = to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .expect("body");
+            let text = String::from_utf8_lossy(&body);
+            assert!(
+                text.starts_with('{'),
+                "{uri} 应当返回 JSON，实际落到了 SPA 兜底上：{}",
+                &text[..text.len().min(80)]
+            );
+        }
+    }
+
+    /// 归一化不能把前端路由也一起吃掉。
+    #[tokio::test]
+    async fn frontend_routes_still_fall_back_to_the_spa() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let response = service(dir.path())
+            .oneshot(
+                Request::builder()
+                    .uri("/some/spa/route")
+                    .body(Body::empty())
+                    .expect("请求"),
+            )
+            .await
+            .expect("响应");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("body");
+        assert!(String::from_utf8_lossy(&body).contains("<!DOCTYPE html>"));
+    }
 }

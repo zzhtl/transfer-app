@@ -28,7 +28,7 @@ pub async fn run(config: AppConfig) -> anyhow::Result<()> {
     // 启动后台清理任务
     upload::janitor::spawn(state.clone());
 
-    let app = routes::build_router(state);
+    let app = routes::build_service(state);
 
     // 打印启动信息
     print_banner(&config, addr);
@@ -51,9 +51,9 @@ pub async fn run(config: AppConfig) -> anyhow::Result<()> {
                 match acceptor.accept(stream).await {
                     Ok(tls_stream) => {
                         let io = hyper_util::rt::TokioIo::new(tls_stream);
-                        let service = hyper_util::service::TowerToHyperService::new(
-                            app.into_service(),
-                        );
+                        // NormalizePath<Router> 自身就是 Service<Request<_>>，
+                        // 不需要再走 Router::into_service()
+                        let service = hyper_util::service::TowerToHyperService::new(app);
                         if let Err(e) = hyper_util::server::conn::auto::Builder::new(
                             hyper_util::rt::TokioExecutor::new(),
                         )
@@ -75,7 +75,12 @@ pub async fn run(config: AppConfig) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "listening");
 
-    axum::serve(listener, app).await?;
+    // 路径归一化包在路由外面，所以这里要把它转成 MakeService 再交给 axum::serve
+    axum::serve(
+        listener,
+        axum::ServiceExt::<axum::extract::Request>::into_make_service(app),
+    )
+    .await?;
 
     Ok(())
 }
