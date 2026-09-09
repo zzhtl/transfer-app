@@ -31,6 +31,16 @@ pub fn build_service(state: AppState) -> NormalizePath<Router> {
     NormalizePathLayer::trim_trailing_slash().layer(build_router(state))
 }
 
+/// `/api` 下没有匹配到任何路由。
+///
+/// 取 `OriginalUri` 而不是 `Uri`：`nest()` 会把前缀剥掉再交给内层，用 `Uri`
+/// 报出来的是 `/nope` 而不是用户真正请求的 `/api/nope`。
+async fn api_not_found(
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
+) -> crate::error::AppError {
+    crate::error::AppError::NotFound(format!("接口 {} 不存在", uri.path()))
+}
+
 /// 构建完整的路由树
 pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
@@ -84,7 +94,10 @@ pub fn build_router(state: AppState) -> Router {
     let auth_state = state.clone();
 
     Router::new()
-        .nest("/api", api)
+        // `/api` 下的未知路径必须是 JSON 404。没有这一条它会落到下面的
+        // `.fallback(static_assets::index)` 上，客户端拿到 200 + 一段前端 HTML
+        // ——一个拼错的接口路径看起来像「调通了」，是最难查的一类问题。
+        .nest("/api", api.fallback(api_not_found))
         // 静态资源
         .route("/", axum::routing::get(static_assets::index))
         .route("/static/{*path}", axum::routing::get(static_assets::serve))
@@ -158,6 +171,37 @@ mod tests {
             assert!(
                 text.starts_with('{'),
                 "{uri} 应当返回 JSON，实际落到了 SPA 兜底上：{}",
+                &text[..text.len().min(80)]
+            );
+        }
+    }
+
+    /// 拼错的接口路径必须是 JSON 404，不能落到 SPA 兜底上。
+    ///
+    /// 落到兜底上的话客户端拿到的是 200 + 一段 HTML，看起来像「调通了」——
+    /// 而实际上那个接口根本不存在。
+    #[tokio::test]
+    async fn an_unknown_api_path_is_a_json_404_not_the_spa() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        for uri in ["/api/nope", "/api/files/typo", "/api/s"] {
+            let response = service(dir.path())
+                .oneshot(
+                    Request::builder()
+                        .uri(uri)
+                        .body(Body::empty())
+                        .expect("请求"),
+                )
+                .await
+                .expect("响应");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+
+            let body = to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .expect("body");
+            let text = String::from_utf8_lossy(&body);
+            assert!(
+                text.starts_with('{'),
+                "{uri} 应当返回 JSON，实际是：{}",
                 &text[..text.len().min(80)]
             );
         }
