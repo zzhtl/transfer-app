@@ -2,6 +2,7 @@ pub mod auth;
 pub mod download;
 pub mod files;
 pub mod health;
+pub mod info;
 pub mod preview;
 pub mod share;
 pub mod static_assets;
@@ -108,6 +109,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/auth/login", axum::routing::post(auth::login))
         .route("/auth/logout", axum::routing::post(auth::logout))
         .route("/auth/status", axum::routing::get(auth::status))
+        // 服务信息（局域网访问地址）
+        .route("/server-info", axum::routing::get(info::get))
         // 健康检查
         .route("/healthz", axum::routing::get(health::live))
         .route("/readyz", axum::routing::get(health::ready));

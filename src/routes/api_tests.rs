@@ -539,3 +539,16 @@ async fn login_checks_the_password_and_slows_down_failures() {
         .starts_with("session="));
 }
 
+#[tokio::test]
+async fn server_info_reports_no_lan_origin_when_bound_to_loopback() {
+    let app = TestApp::with_args(&["-b", "127.0.0.1", "-P", "9123"]);
+    let (status, _, body) = app.get("/api/server-info").await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert!(json["lan_origin"].is_null(), "{json}");
+
+    let app = TestApp::with_args(&["-b", "192.168.7.8", "-P", "9123"]);
+    let (_, _, body) = app.get("/api/server-info").await;
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(json["lan_origin"], "http://192.168.7.8:9123");
+}

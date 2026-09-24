@@ -1,11 +1,18 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+#[cfg(feature = "tls")]
+use std::time::Duration;
+
+use axum::serve::ListenerExt as _;
 
 use crate::config::AppConfig;
 use crate::routes;
 use crate::state::{AppState, AppStateInner};
 use crate::upload;
 use crate::util::ip;
+
+#[cfg(feature = "tls")]
+const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 构建并启动服务器
 pub async fn run(config: AppConfig) -> anyhow::Result<()> {
@@ -43,29 +50,51 @@ pub async fn run(config: AppConfig) -> anyhow::Result<()> {
         let tls_acceptor = tokio_rustls::TlsAcceptor::from(tls_config);
 
         loop {
-            let (stream, _peer) = listener.accept().await?;
+            // accept 失败（比如 EMFILE 句柄耗尽）通常是暂时的。之前用 `?` 直接从 run()
+            // 返回，整个服务就退出了；这里和 axum::serve 一样记日志、稍等后继续。
+            let (stream, _peer) = match listener.accept().await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    tracing::warn!(error = %e, "accept failed");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+            };
+            if let Err(e) = stream.set_nodelay(true) {
+                tracing::trace!(error = %e, "set_nodelay failed");
+            }
             let acceptor = tls_acceptor.clone();
             let app = app.clone();
 
             tokio::spawn(async move {
-                match acceptor.accept(stream).await {
-                    Ok(tls_stream) => {
-                        let io = hyper_util::rt::TokioIo::new(tls_stream);
-                        // NormalizePath<Router> 自身就是 Service<Request<_>>，
-                        // 不需要再走 Router::into_service()
-                        let service = hyper_util::service::TowerToHyperService::new(app);
-                        if let Err(e) = hyper_util::server::conn::auto::Builder::new(
-                            hyper_util::rt::TokioExecutor::new(),
-                        )
-                        .serve_connection(io, service)
-                        .await
-                        {
-                            tracing::debug!(error = %e, "connection error");
-                        }
-                    }
-                    Err(e) => {
+                // 握手要有时限：只建 TCP 不握手的连接不能一直挂着
+                let tls_stream = match tokio::time::timeout(
+                    TLS_HANDSHAKE_TIMEOUT,
+                    acceptor.accept(stream),
+                )
+                .await
+                {
+                    Ok(Ok(tls_stream)) => tls_stream,
+                    Ok(Err(e)) => {
                         tracing::debug!(error = %e, "TLS handshake failed");
+                        return;
                     }
+                    Err(_) => {
+                        tracing::debug!("TLS handshake timed out");
+                        return;
+                    }
+                };
+                let io = hyper_util::rt::TokioIo::new(tls_stream);
+                // NormalizePath<Router> 自身就是 Service<Request<_>>，
+                // 不需要再走 Router::into_service()
+                let service = hyper_util::service::TowerToHyperService::new(app);
+                if let Err(e) = hyper_util::server::conn::auto::Builder::new(
+                    hyper_util::rt::TokioExecutor::new(),
+                )
+                .serve_connection(io, service)
+                .await
+                {
+                    tracing::debug!(error = %e, "connection error");
                 }
             });
         }
@@ -77,7 +106,11 @@ pub async fn run(config: AppConfig) -> anyhow::Result<()> {
 
     // 路径归一化包在路由外面，所以这里要把它转成 MakeService 再交给 axum::serve
     axum::serve(
-        listener,
+        listener.tap_io(|tcp| {
+            if let Err(e) = tcp.set_nodelay(true) {
+                tracing::trace!(error = %e, "set_nodelay failed");
+            }
+        }),
         axum::ServiceExt::<axum::extract::Request>::into_make_service(app),
     )
     .await?;
