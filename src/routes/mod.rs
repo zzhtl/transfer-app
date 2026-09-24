@@ -126,6 +126,9 @@ pub fn build_router(state: AppState) -> Router {
 }
 
 #[cfg(test)]
+mod api_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};

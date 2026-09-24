@@ -3,6 +3,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Response, StatusCode};
 use futures_util::StreamExt;
 use crate::error::AppError;
+use crate::fs::path_safety::split_relative;
 use crate::state::AppState;
 use crate::upload::session::UploadSession;
 use crate::upload::writer::ChunkWriter;
@@ -51,7 +52,13 @@ pub async fn create(
         .cloned()
         .unwrap_or_else(|| "unnamed".to_string());
     let filename = sanitize_filename::sanitize(&filename);
-    let relative_path = metadata.get("relativePath").cloned();
+    // relativePath 决定 finalize 时在 targetDir 下建哪些子目录，原样拼接的话
+    // `../` 或绝对路径就能写出共享根。在这里就拒绝，免得客户端先传完几个 GB 才失败；
+    // 存进会话的是清理过的版本。
+    let relative_path = match metadata.get("relativePath").filter(|r| !r.is_empty()) {
+        Some(rel) => Some(split_relative(rel)?.join("/")),
+        None => None,
+    };
     let target_dir_str = metadata
         .get("targetDir")
         .cloned()
@@ -253,24 +260,16 @@ async fn finalize_upload(state: &AppState, file_id: &str) -> Result<(), AppError
     let part_path = session.part_path(tmp_dir);
     let expected_checksum = session.expected_checksum.clone();
 
-    // 计算最终路径
-    let final_dir = if let Some(ref rel) = session.relative_path {
-        if rel.is_empty() {
-            session.target_dir.clone()
-        } else {
-            // 取 relative_path 的父目录部分
-            let rel_parent = std::path::Path::new(rel)
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty());
-            if let Some(parent) = rel_parent {
-                session.target_dir.join(parent)
-            } else {
-                session.target_dir.clone()
-            }
-        }
-    } else {
-        session.target_dir.clone()
+    // 计算最终目录：relative_path 除最后一段（文件名本身，落盘名用 session.filename）
+    // 外都是要建的子目录。会话可能来自重启恢复的 .meta，这里必须重新做越界校验。
+    let mut sub_dirs = match session.relative_path.as_deref() {
+        Some(rel) => split_relative(rel)?,
+        None => Vec::new(),
     };
+    sub_dirs.pop();
+    let final_dir = state
+        .path_safety
+        .resolve_for_create(&session.target_dir, &sub_dirs)?;
 
     tokio::fs::create_dir_all(&final_dir).await?;
 

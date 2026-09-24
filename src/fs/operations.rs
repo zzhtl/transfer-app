@@ -8,13 +8,31 @@ pub async fn mkdir(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
+/// 目标已存在。消息里只带名字：之前带的是 `to.display()`，会把服务器上的绝对路径
+/// 带到浏览器的错误提示里。
+fn already_exists(to: &Path) -> AppError {
+    AppError::Conflict(
+        to.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default(),
+    )
+}
+
+/// 目标落在源目录自身之内。放行的话，rename 会因 EINVAL 失败并退回复制，
+/// 而 copy_dir_recursive 边走边往自己里面复制，一路长到 ENAMETOOLONG 才停，留下一大堆垃圾。
+fn ensure_not_into_itself(from: &Path, to: &Path) -> Result<(), AppError> {
+    if to.starts_with(from) {
+        return Err(AppError::BadRequest(
+            "cannot move or copy a folder into itself".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// 重命名文件/目录
 pub async fn rename(from: &Path, to: &Path) -> Result<(), AppError> {
     if to.exists() {
-        return Err(AppError::BadRequest(format!(
-            "target already exists: {}",
-            to.display()
-        )));
+        return Err(already_exists(to));
     }
     tokio::fs::rename(from, to).await?;
     Ok(())
@@ -22,11 +40,9 @@ pub async fn rename(from: &Path, to: &Path) -> Result<(), AppError> {
 
 /// 复制文件
 pub async fn copy_file(from: &Path, to: &Path) -> Result<(), AppError> {
+    ensure_not_into_itself(from, to)?;
     if to.exists() {
-        return Err(AppError::BadRequest(format!(
-            "target already exists: {}",
-            to.display()
-        )));
+        return Err(already_exists(to));
     }
     if from.is_dir() {
         copy_dir_recursive(from, to).await?;
@@ -38,11 +54,9 @@ pub async fn copy_file(from: &Path, to: &Path) -> Result<(), AppError> {
 
 /// 移动文件/目录
 pub async fn move_entry(from: &Path, to: &Path) -> Result<(), AppError> {
+    ensure_not_into_itself(from, to)?;
     if to.exists() {
-        return Err(AppError::BadRequest(format!(
-            "target already exists: {}",
-            to.display()
-        )));
+        return Err(already_exists(to));
     }
     // 先尝试 rename（同文件系统），失败则 copy + delete
     if tokio::fs::rename(from, to).await.is_err() {

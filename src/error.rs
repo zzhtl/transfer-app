@@ -32,6 +32,12 @@ pub enum AppError {
     #[error("is a directory")]
     IsADirectory,
 
+    #[error("not a directory")]
+    NotADirectory,
+
+    #[error("already exists: {0}")]
+    Conflict(String),
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 
@@ -57,8 +63,16 @@ impl IntoResponse for AppError {
             Self::OffsetConflict { .. } => (StatusCode::CONFLICT, "offset_conflict"),
             Self::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             Self::IsADirectory => (StatusCode::BAD_REQUEST, "is_directory"),
+            Self::NotADirectory => (StatusCode::BAD_REQUEST, "not_directory"),
+            Self::Conflict(_) => (StatusCode::CONFLICT, "already_exists"),
             Self::Io(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 (StatusCode::NOT_FOUND, "not_found")
+            }
+            Self::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                (StatusCode::FORBIDDEN, "permission_denied")
+            }
+            Self::Io(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                (StatusCode::CONFLICT, "already_exists")
             }
             Self::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "io_error"),
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
