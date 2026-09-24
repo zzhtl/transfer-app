@@ -165,12 +165,14 @@ sudo systemctl enable --now transfer-app
 ## Web 界面能力
 
 - 面包屑导航，支持通过 URL hash 直接定位子目录
-- 名称、大小、修改时间排序
-- 列表视图和网格视图切换
-- 当前目录关键字过滤
-- 右键菜单支持打开、预览、下载、打包下载、分享、移动、复制、重命名、删除
-- 上传面板支持文件上传、文件夹上传、拖拽上传、暂停、继续和进度显示
-- 选中多个项目后可批量删除，或打包为 ZIP 下载
+- 名称、大小、修改时间排序（名称按自然顺序，「第2集」在「第10集」前面）
+- 列表视图和网格视图切换；大目录只渲染可见部分，上万个文件也能流畅滚动和点选
+- 当前目录关键字过滤；输入两个字以上时递归搜索子文件夹
+- 单击选中、双击打开，Shift / Ctrl（⌘）多选；方向键、Enter、Delete、F2、Ctrl+A、Esc、`/` 等快捷键
+- 右键菜单或每行末尾的 ⋯ 支持打开、预览、下载、打包下载、分享、移动、复制、重命名、删除；触屏上单击直接打开
+- 上传面板支持文件、文件夹、拖入整个文件夹（保留目录结构），暂停、继续、失败重试，显示总进度
+- 预览支持 ←/→ 切换同目录文件；在线编辑支持 Ctrl+S 保存，未保存时关闭会先确认
+- 「我的分享」查看、复制、二维码、撤销；「手机访问」显示本机局域网地址的二维码
 - 移动端提供浮动上传按钮
 
 ## 服务端接口概览
@@ -189,7 +191,7 @@ sudo systemctl enable --now transfer-app
 | `OPTIONS`, `POST` | `/api/upload` | tus 能力发现、创建上传会话 |
 | `HEAD`, `PATCH`, `DELETE` | `/api/upload/{file_id}` | 查询进度、续传、取消上传 |
 | `GET` | `/api/download/{path}` | 单文件下载，支持 `Range` / `ETag` |
-| `GET` | `/api/download-zip?paths=a,b,c` | 流式 ZIP 下载 |
+| `GET` | `/api/download-zip?paths=a&paths=b[&name=x.zip]` | 流式 ZIP 下载（`paths` 可重复，每个值是一个完整路径） |
 | `GET` | `/api/preview/{path}` | 文件预览 |
 | `POST`, `GET` | `/api/share` | 创建分享链接、列出全部分享 |
 | `DELETE` | `/api/share/{id}` | 撤销分享 |
@@ -200,6 +202,7 @@ sudo systemctl enable --now transfer-app
 | `POST` | `/api/auth/login` | 登录 |
 | `POST` | `/api/auth/logout` | 退出登录 |
 | `GET` | `/api/auth/status` | 鉴权状态查询 |
+| `GET` | `/api/server-info` | 版本与局域网访问地址（分享链接、二维码用） |
 | `GET` | `/api/healthz` | 存活检查 |
 | `GET` | `/api/readyz` | 就绪检查 |
 
@@ -217,10 +220,11 @@ sudo systemctl enable --now transfer-app
 
 - 所有访问路径都会被限制在共享根目录内，防止目录穿越
 - 程序会在共享目录下创建隐藏目录 `.transfer-tmp`，用于保存上传分片、会话元数据和分享记录
-- `.transfer-tmp` 不会出现在文件列表中
+- `.transfer-tmp` 不会出现在文件列表和搜索结果中，也不能通过接口读写
 - 启动时会尝试恢复未完成的上传；后台任务会按小时扫描并清理过期上传
 - 未设置 `--auth-password` 时匿名开放；设置后除登录接口和分享公开链接（`/api/s/`）外均需登录。会话用每进程随机的 HMAC key 签名，服务重启后需要重新登录
-- `CORS` 配置较宽松，只建议用于受信任网络，或放在反向代理之后
+- 不开启 `CORS`，只接受同源访问：其他网页无法跨域读写这里的文件
+- 以 inline 方式打开用户上传的 html、svg、xml 时附带 `Content-Security-Policy: sandbox`，其中的脚本无法以本站身份执行
 - 前端静态资源通过 `rust-embed` 嵌入二进制，编译后不依赖额外前端构建产物
 
 ## 关键依赖
@@ -249,10 +253,12 @@ cargo test
 
 当前仓库内已有测试主要覆盖：
 
-- `HTTP Range` 解析
-- 路径安全与目录穿越防护
+- `HTTP Range` 解析、`Content-Disposition`、`ETag` / `If-Range`
+- 路径安全与目录穿越防护（含上传 `relativePath`、符号链接、内部目录）
+- 接口端到端测试（`src/routes/api_tests.rs`）：上传、打包下载、下载响应头与压缩、静态资源缓存、列目录、搜索、移动 / 复制、登录、CORS
+- Markdown 预览的 HTML 转义与链接过滤
 
-接口集成测试和前端交互测试还可以继续补充。
+前端交互测试还可以继续补充。
 
 ## 已知限制
 
