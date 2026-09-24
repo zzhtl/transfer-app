@@ -10,7 +10,10 @@ use serde::Deserialize;
 use crate::auth::middleware::session_cookie;
 use crate::auth::{now_secs, token};
 use crate::error::AppError;
+use crate::share::record::sha256_hex;
 use crate::state::AppState;
+
+const LOGIN_FAILURE_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 
 #[derive(Deserialize)]
 pub struct LoginReq {
@@ -27,8 +30,14 @@ pub async fn login(
         return Ok(Json(serde_json::json!({ "authenticated": true })).into_response());
     };
 
+    // 先各自取 SHA-256 再比较：ct_eq 遇到长度不同会立即返回，直接比原文会泄露密码长度
     let expected = state.config.auth_password.as_deref().unwrap_or_default();
-    if !token::ct_eq(req.password.as_bytes(), expected.as_bytes()) {
+    if !token::ct_eq(
+        sha256_hex(req.password.as_bytes()).as_bytes(),
+        sha256_hex(expected.as_bytes()).as_bytes(),
+    ) {
+        // 失败固定慢一拍，抬高在局域网里逐个猜密码的成本
+        tokio::time::sleep(LOGIN_FAILURE_DELAY).await;
         return Err(AppError::Unauthorized("invalid password"));
     }
 

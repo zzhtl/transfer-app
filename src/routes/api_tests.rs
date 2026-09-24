@@ -349,6 +349,20 @@ async fn inline_active_content_is_sandboxed() {
 }
 
 #[tokio::test]
+async fn cross_origin_requests_are_not_granted_cors() {
+    let app = TestApp::new();
+    let (_, headers, _) = app
+        .send(
+            Request::get("/api/files")
+                .header(header::ORIGIN, "http://evil.example")
+                .body(Body::empty())
+                .expect("请求"),
+        )
+        .await;
+    assert!(headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+}
+
+#[tokio::test]
 async fn static_assets_revalidate_with_etag() {
     let app = TestApp::new();
     for uri in ["/", "/static/js/main.js"] {
@@ -494,5 +508,34 @@ async fn search_skips_the_internal_dir() {
         .map(|r| r["path"].as_str().unwrap())
         .collect();
     assert_eq!(paths, vec!["notes/meta-plan.txt"]);
+}
+
+#[tokio::test]
+async fn login_checks_the_password_and_slows_down_failures() {
+    let app = TestApp::with_args(&["--auth-password", "s3cret"]);
+
+    let started = std::time::Instant::now();
+    let (status, _) = post_json(
+        &app,
+        "/api/auth/login",
+        serde_json::json!({"password": "nope"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(started.elapsed() >= std::time::Duration::from_millis(900));
+
+    let (status, headers, _) = app
+        .send(
+            Request::post("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"password":"s3cret"}"#))
+                .expect("请求"),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .starts_with("session="));
 }
 

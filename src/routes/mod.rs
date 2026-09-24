@@ -15,7 +15,6 @@ use tower::{Layer as _, ServiceBuilder};
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::predicate::{Predicate as _, SizeAbove};
 use tower_http::compression::CompressionLayer;
-use tower_http::cors::CorsLayer;
 use tower_http::normalize_path::{NormalizePath, NormalizePathLayer};
 use tower_http::request_id::SetRequestIdLayer;
 use tower_http::trace::TraceLayer;
@@ -113,7 +112,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/healthz", axum::routing::get(health::live))
         .route("/readyz", axum::routing::get(health::ready));
 
-    // 鉴权中间件需要一份 state（挂在 CORS 内侧）
+    // 鉴权中间件需要一份 state
     let auth_state = state.clone();
 
     Router::new()
@@ -139,8 +138,9 @@ pub fn build_router(state: AppState) -> Router {
                         .no_br()  // 只用 gzip，br 对动态内容收益不大
                         .compress_when(SizeAbove::new(1024).and(compressible)),
                 )
-                .layer(CorsLayer::very_permissive())
-                // 鉴权：CORS 内侧（OPTIONS 已被 CORS 短路，tus 预检不受影响）、CatchPanic 外侧
+                // 不挂 CORS：SPA 和 tus 都是同源请求。之前的 very_permissive 会反射任意
+                // Origin，匿名模式下任何网页都能跨域读写这里的文件。
+                // 鉴权挂在 CatchPanic 外侧
                 .layer(axum::middleware::from_fn_with_state(
                     auth_state,
                     crate::auth::middleware::require_auth,

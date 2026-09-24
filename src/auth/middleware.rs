@@ -1,5 +1,6 @@
-//! 鉴权中间件。挂在 CorsLayer 内侧、CatchPanicLayer 外侧：
-//! CORS 会短路所有 OPTIONS（含 tus 预检），故此处无需特判 OPTIONS。
+//! 鉴权中间件。挂在 CatchPanicLayer 外侧。
+//! 不特判 OPTIONS：服务只接受同源请求（不挂 CORS），浏览器不会发预检；
+//! tus 的 `OPTIONS /api/upload` 能力发现在启用鉴权时同样需要登录。
 //! 中间件只读 header/URI 后原样透传 Request，绝不触碰 body（保住流式 PATCH）。
 
 use axum::extract::{Request, State};
