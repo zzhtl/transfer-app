@@ -263,19 +263,16 @@ pub async fn list_dir(
     let base = state.path_safety.resolve(&rec.target)?;
     let abs = resolve_within_share(&state, &rec, &params.path)?;
     if !abs.is_dir() {
-        return Err(AppError::IsADirectory);
+        return Err(AppError::NotADirectory);
     }
 
-    let mut entries = walker::list_directory(&abs).await?;
     // path 填为相对分享 base 的路径，供前端作为子路径二次访问
-    for entry in &mut entries {
-        let entry_abs = abs.join(&entry.name);
-        entry.path = entry_abs
-            .strip_prefix(&base)
-            .unwrap_or(&entry_abs)
-            .to_string_lossy()
-            .to_string();
-    }
+    let prefix = abs
+        .strip_prefix(&base)
+        .unwrap_or(&abs)
+        .to_string_lossy()
+        .to_string();
+    let entries = walker::list_directory(&abs, &prefix).await?;
 
     Ok(Json(serde_json::json!({
         "path": params.path,

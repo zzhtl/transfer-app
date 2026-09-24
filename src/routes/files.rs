@@ -1,3 +1,6 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::header::CONTENT_TYPE;
@@ -44,27 +47,16 @@ pub async fn list(
     };
 
     if !abs.is_dir() {
-        return Err(AppError::IsADirectory);
+        return Err(AppError::NotADirectory);
     }
-
-    let mut entries = walker::list_directory(&abs).await?;
-    // 填充相对路径
-    let prefix = &state.root;
-    for entry in &mut entries {
-        let entry_abs = abs.join(&entry.name);
-        entry.path = entry_abs
-            .strip_prefix(prefix)
-            .unwrap_or(&entry_abs)
-            .to_string_lossy()
-            .to_string();
-    }
-    let breadcrumbs = build_breadcrumbs(&abs, &state.root);
 
     let display_path = abs
         .strip_prefix(&state.root)
         .unwrap_or(&abs)
         .to_string_lossy()
         .to_string();
+    let entries = walker::list_directory(&abs, &display_path).await?;
+    let breadcrumbs = build_breadcrumbs(&abs, &state.root);
 
     Ok(Json(ListResponse {
         path: display_path,
@@ -213,6 +205,14 @@ fn default_limit() -> usize {
     50
 }
 
+struct CancelOnDrop(Arc<AtomicBool>);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 /// GET /api/files/search?q=xxx&path=xxx
 pub async fn search(
     State(state): State<AppState>,
@@ -227,6 +227,11 @@ pub async fn search(
     let query = params.q.to_lowercase();
     let limit = params.limit.min(200);
 
+    // 客户端中止请求（比如继续输入发起了新搜索）时 handler future 被 drop，
+    // 借 guard 通知后台遍历停下，免得连续输入时堆起一串全盘遍历
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let _cancel_on_drop = CancelOnDrop(cancelled.clone());
+
     let base_clone = base.clone();
     let results = tokio::task::spawn_blocking(move || {
         let mut found = Vec::new();
@@ -234,8 +239,12 @@ pub async fn search(
             .min_depth(1)
             .max_depth(10)
             .into_iter()
+            .filter_entry(|e| e.file_name() != ".transfer-tmp")
             .filter_map(Result::ok)
         {
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
             let name = entry.file_name().to_string_lossy().to_lowercase();
             if name.contains(&query) {
                 found.push(entry.into_path());

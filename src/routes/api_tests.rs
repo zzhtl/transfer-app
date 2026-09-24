@@ -348,6 +348,91 @@ async fn inline_active_content_is_sandboxed() {
     assert!(headers.get(header::CONTENT_SECURITY_POLICY).is_none());
 }
 
+#[tokio::test]
+async fn static_assets_revalidate_with_etag() {
+    let app = TestApp::new();
+    for uri in ["/", "/static/js/main.js"] {
+        let (status, headers, body) = app.get(uri).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        assert_eq!(headers[header::CACHE_CONTROL], "no-cache", "{uri}");
+        assert!(!body.is_empty());
+        let etag = headers[header::ETAG].clone();
+
+        let (status, _, body) = app
+            .send(
+                Request::get(uri)
+                    .header(header::IF_NONE_MATCH, etag)
+                    .body(Body::empty())
+                    .expect("请求"),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NOT_MODIFIED, "{uri}");
+        assert!(body.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn missing_static_asset_is_404_not_the_spa() {
+    let app = TestApp::new();
+    let (status, _, _) = app.get("/static/js/does-not-exist.js").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn listing_orders_dirs_first_and_builds_relative_paths() {
+    let app = TestApp::new();
+    app.write("docs/b.txt", b"bb");
+    app.write("docs/A.txt", b"a");
+    app.write("docs/zeta/inner.txt", b"x");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        app.root().join("docs/zeta"),
+        app.root().join("docs/link-dir"),
+    )
+    .expect("符号链接");
+
+    let (status, _, body) = app.get("/api/files?path=docs").await;
+    assert_eq!(status, StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    let entries = json["entries"].as_array().expect("entries");
+    let summary: Vec<(String, String, bool)> = entries
+        .iter()
+        .map(|e| {
+            (
+                e["name"].as_str().unwrap().to_string(),
+                e["path"].as_str().unwrap().to_string(),
+                e["is_dir"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+
+    let mut expected = vec![
+        ("zeta".to_string(), "docs/zeta".to_string(), true),
+        ("A.txt".to_string(), "docs/A.txt".to_string(), false),
+        ("b.txt".to_string(), "docs/b.txt".to_string(), false),
+    ];
+    #[cfg(unix)]
+    expected.insert(
+        0,
+        ("link-dir".to_string(), "docs/link-dir".to_string(), true),
+    );
+    assert_eq!(summary, expected);
+    assert_eq!(entries.last().unwrap()["size"], 2);
+    assert_eq!(entries.last().unwrap()["mime_type"], "text/plain");
+}
+
+#[tokio::test]
+async fn listing_a_file_is_a_bad_request_and_root_hides_internal_dir() {
+    let app = TestApp::new();
+    app.write("f.txt", b"x");
+    let (status, _, body) = app.get("/api/files?path=f.txt").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(String::from_utf8_lossy(&body).contains("not_directory"));
+
+    let (_, _, body) = app.get("/api/files").await;
+    assert!(!String::from_utf8_lossy(&body).contains(".transfer-tmp"));
+}
+
 async fn post_json(app: &TestApp, uri: &str, json: serde_json::Value) -> (StatusCode, Bytes) {
     let (status, _, body) = app
         .send(
@@ -394,5 +479,20 @@ async fn existing_target_is_a_conflict_without_absolute_paths() {
     let text = String::from_utf8_lossy(&body);
     assert!(text.contains("already_exists"), "{text}");
     assert!(!text.contains(&app.root().display().to_string()), "{text}");
+}
+
+#[tokio::test]
+async fn search_skips_the_internal_dir() {
+    let app = TestApp::new();
+    app.write("notes/meta-plan.txt", b"x");
+    app.write(".transfer-tmp/abc.meta", b"{}");
+    let (status, _, body) = app.get("/api/files/search?q=meta").await;
+    assert_eq!(status, StatusCode::OK);
+    let results: Vec<serde_json::Value> = serde_json::from_slice(&body).expect("JSON");
+    let paths: Vec<&str> = results
+        .iter()
+        .map(|r| r["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths, vec!["notes/meta-plan.txt"]);
 }
 
