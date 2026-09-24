@@ -9,7 +9,8 @@
 
     --text-primary: #1a1d23;
     --text-secondary: #5f6368;
-    --text-tertiary: #9aa0a6;
+    /* 小字（大小、时间、提示）在浅色背景上至少 4.5:1 */
+    --text-tertiary: #6b7280;
     --text-inverse: #ffffff;
 
     --accent: #2563eb;
@@ -58,8 +59,9 @@
     --duration-normal: 250ms;
     --duration-slow: 400ms;
 
-    /* 字体 */
-    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    /* 字体：显式列出中文字体，避免 Windows 上中文回落到宋体 */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'PingFang SC',
+        'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
     --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
     --font-size-xs: 0.75rem;
     --font-size-sm: 0.8125rem;
@@ -68,15 +70,26 @@
     --font-size-xl: 1.25rem;
     --font-size-2xl: 1.5rem;
 
-    /* 文件列表行高 */
+    /* 文件列表行高：窗口化渲染按它计算位置，必须是行的精确高度 */
     --row-height: 48px;
+    /* 网格视图：格子高度、最小宽度、间距 */
+    --grid-cell-height: 132px;
+    --grid-cell-min: 120px;
+    --grid-gap: 12px;
 
     /* 侧栏 */
     --sidebar-width: 260px;
+
+    /* 原生控件（复选框、下拉、滚动条）跟随主题 */
+    color-scheme: light dark;
+    accent-color: var(--accent);
 }
+
+[data-theme="light"] { color-scheme: light; }
 
 /* ===== 暗色主题 ===== */
 [data-theme="dark"] {
+    color-scheme: dark;
     --bg-primary: #0d1117;
     --bg-secondary: #161b22;
     --bg-tertiary: #1c2128;
@@ -85,7 +98,7 @@
 
     --text-primary: #e6edf3;
     --text-secondary: #8b949e;
-    --text-tertiary: #6e7681;
+    --text-tertiary: #7d8590;
     --text-inverse: #0d1117;
 
     --accent: #58a6ff;
@@ -120,7 +133,7 @@
         --bg-active: rgba(255, 255, 255, 0.08);
         --text-primary: #e6edf3;
         --text-secondary: #8b949e;
-        --text-tertiary: #6e7681;
+        --text-tertiary: #7d8590;
         --text-inverse: #0d1117;
         --accent: #58a6ff;
         --accent-hover: #79c0ff;

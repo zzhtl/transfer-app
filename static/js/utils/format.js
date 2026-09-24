@@ -2,13 +2,15 @@
  * 格式化工具函数
  */
 
+import { icon } from './dom.js';
+
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
 
 /** 格式化文件大小 */
 export function formatSize(bytes) {
     if (bytes == null || bytes < 0) return '-';
     if (bytes === 0) return '0 B';
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), SIZE_UNITS.length - 1);
     const val = bytes / Math.pow(1024, i);
     return `${val.toFixed(i > 0 ? 1 : 0)} ${SIZE_UNITS[i]}`;
 }
@@ -35,37 +37,44 @@ export function formatTime(ts) {
     return `${y}-${m}-${day}`;
 }
 
-/** 文件图标 SVG */
-export function fileIcon(file) {
-    if (file.is_dir) {
-        return `<svg width="20" height="20" viewBox="0 0 24 24" fill="var(--accent)" stroke="none">
-            <path d="M2 6a2 2 0 012-2h5l2 2h9a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
-        </svg>`;
-    }
-
-    const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    const color = extColor(ext);
-
-    return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.5">
-        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/>
-        <polyline points="14 2 14 8 20 8"/>
-    </svg>`;
+/** 完整时间（用于悬停提示），如 2026-09-24 08:22 */
+export function formatDateTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts * 1000);
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function extColor(ext) {
+/** 剩余时间，如 3天 / 5小时 / 12分钟 */
+export function formatRemaining(seconds) {
+    if (seconds <= 0) return '已过期';
+    if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))} 分钟`;
+    if (seconds < 86400) return `${Math.round(seconds / 3600)} 小时`;
+    return `${Math.round(seconds / 86400)} 天`;
+}
+
+/** 文件图标：一份 SVG sprite + 按类别着色的 class */
+export function fileIcon(file) {
+    if (file.is_dir) return icon('folder', 'ic-folder');
+    const category = fileCategory(file.name);
+    return icon('file', category ? `ic-${category}` : '');
+}
+
+const CATEGORY = {};
+for (const [cat, exts] of Object.entries({
     // 克制配色：仅少数大类保留低饱和度点缀色，其余一律中性灰
-    const CODE = '#5b8def', IMAGE = '#c678a4', VIDEO = '#9a7bd0',
-        AUDIO = '#4fa8a0', ARCHIVE = '#c99a4e', PDF = '#d16a6a';
-    const colors = {
-        js: CODE, ts: CODE, jsx: CODE, tsx: CODE, rs: CODE, go: CODE,
-        py: CODE, java: CODE, c: CODE, cpp: CODE, h: CODE, hpp: CODE,
-        html: CODE, css: CODE, json: CODE, xml: CODE, yml: CODE, yaml: CODE,
-        toml: CODE, sh: CODE, rb: CODE, php: CODE, sql: CODE,
-        png: IMAGE, jpg: IMAGE, jpeg: IMAGE, gif: IMAGE, webp: IMAGE, svg: IMAGE, bmp: IMAGE, ico: IMAGE,
-        mp4: VIDEO, mkv: VIDEO, avi: VIDEO, webm: VIDEO, mov: VIDEO, flv: VIDEO,
-        mp3: AUDIO, wav: AUDIO, flac: AUDIO, aac: AUDIO, ogg: AUDIO, m4a: AUDIO,
-        pdf: PDF,
-        zip: ARCHIVE, tar: ARCHIVE, gz: ARCHIVE, rar: ARCHIVE, '7z': ARCHIVE, bz2: ARCHIVE, xz: ARCHIVE,
-    };
-    return colors[ext] || 'var(--text-tertiary)';
+    code: 'js ts jsx tsx rs go py java c cpp h hpp html css json xml yml yaml toml sh rb php sql vue svelte kt swift',
+    image: 'png jpg jpeg gif webp svg bmp ico heic avif',
+    video: 'mp4 mkv avi webm mov flv m4v',
+    audio: 'mp3 wav flac aac ogg m4a',
+    pdf: 'pdf',
+    archive: 'zip tar gz rar 7z bz2 xz tgz',
+})) {
+    for (const ext of exts.split(' ')) CATEGORY[ext] = cat;
+}
+
+/** 按扩展名归类：code / image / video / audio / pdf / archive，其余返回空串 */
+export function fileCategory(name) {
+    const dot = name.lastIndexOf('.');
+    return dot > 0 ? CATEGORY[name.slice(dot + 1).toLowerCase()] || '' : '';
 }

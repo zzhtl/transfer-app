@@ -2,14 +2,85 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#f8f9fc">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#f8f9fc" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+    <meta name="color-scheme" content="light dark">
     <title>FileTransfer</title>
+    <script>
+        // 首次绘制前就定下主题，避免先闪一下浅色再切成深色
+        try {
+            var theme = localStorage.getItem('theme');
+            if (theme === 'light' || theme === 'dark') document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) { /* 读不到存储就跟随系统 */ }
+    </script>
     <link rel="stylesheet" href="/static/css/tokens.css">
     <link rel="stylesheet" href="/static/css/layout.css">
+    <!-- 平铺 import 依赖：不预加载的话，浏览器要逐层解析完模块才发现下一层。新增模块时同步更新这里 -->
+    <link rel="modulepreload" href="/static/js/main.js">
+    <link rel="modulepreload" href="/static/js/store.js">
+    <link rel="modulepreload" href="/static/js/api.js">
+    <link rel="modulepreload" href="/static/js/actions.js">
+    <link rel="modulepreload" href="/static/js/router.js">
+    <link rel="modulepreload" href="/static/js/utils/dom.js">
+    <link rel="modulepreload" href="/static/js/utils/format.js">
+    <link rel="modulepreload" href="/static/js/utils/origin.js">
+    <link rel="modulepreload" href="/static/js/utils/clipboard.js">
+    <link rel="modulepreload" href="/static/js/utils/qr.js">
+    <link rel="modulepreload" href="/static/js/components/toast.js">
+    <link rel="modulepreload" href="/static/js/components/dialog.js">
+    <link rel="modulepreload" href="/static/js/components/theme-toggle.js">
+    <link rel="modulepreload" href="/static/js/components/breadcrumb.js">
+    <link rel="modulepreload" href="/static/js/components/toolbar.js">
+    <link rel="modulepreload" href="/static/js/components/file-list.js">
+    <link rel="modulepreload" href="/static/js/components/context-menu.js">
+    <link rel="modulepreload" href="/static/js/components/folder-picker.js">
+    <link rel="modulepreload" href="/static/js/components/upload-panel.js">
+    <link rel="modulepreload" href="/static/js/components/preview-modal.js">
+    <link rel="modulepreload" href="/static/js/components/share-modal.js">
+    <link rel="modulepreload" href="/static/js/components/shares-dialog.js">
+    <link rel="modulepreload" href="/static/js/components/qr-dialog.js">
+    <link rel="modulepreload" href="/static/js/components/login-modal.js">
+    <link rel="modulepreload" href="/static/js/components/share-landing.js">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📁</text></svg>">
 </head>
 <body>
+    <!-- 图标 sprite：各处用 <svg><use href="#i-…"></svg> 引用，列表每行不必再内联整段 SVG -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+        <symbol id="i-folder" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M2 6a2 2 0 012-2h5l2 2h9a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></symbol>
+        <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></symbol>
+        <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><path d="M12 11v6M9 14h6"/></symbol>
+        <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"/><path d="M14 2v6h6"/></symbol>
+        <symbol id="i-file-plus" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></symbol>
+        <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></symbol>
+        <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+        <symbol id="i-archive" viewBox="0 0 24 24"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></symbol>
+        <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+        <symbol id="i-edit" viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></symbol>
+        <symbol id="i-move" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M4 20v-7a4 4 0 014-4h12"/></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></symbol>
+        <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"/></symbol>
+        <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.8" fill="currentColor" stroke="none"/></symbol>
+        <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+        <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+        <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+        <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+        <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></symbol>
+        <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></symbol>
+        <symbol id="i-link-off" viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/><path d="M3 3l18 18"/></symbol>
+        <symbol id="i-qr" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM18 18h3v3h-3zM14 21h1M21 14v1"/></symbol>
+        <symbol id="i-phone" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></symbol>
+        <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+        <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></symbol>
+        <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+    </svg>
+
     <div id="app" class="app">
         <!-- 顶栏 -->
         <header class="topbar glass">
@@ -17,98 +88,97 @@
                 <h1 class="topbar-title">FileTransfer</h1>
             </div>
             <div class="topbar-right">
-                <button id="theme-toggle" class="icon-btn" title="切换主题"></button>
+                <button type="button" class="icon-btn btn-phone" title="手机扫码访问" aria-label="手机扫码访问"><svg class="ic"><use href="#i-phone"></use></svg></button>
+                <button type="button" class="icon-btn btn-shares" title="我的分享" aria-label="我的分享"><svg class="ic"><use href="#i-share"></use></svg></button>
+                <button type="button" id="theme-toggle" class="icon-btn" title="切换主题" aria-label="切换主题"></button>
+                <button type="button" class="icon-btn btn-logout" title="退出登录" aria-label="退出登录" hidden><svg class="ic"><use href="#i-logout"></use></svg></button>
             </div>
         </header>
 
         <!-- 面包屑 -->
-        <nav id="breadcrumb" class="breadcrumb"></nav>
+        <nav id="breadcrumb" class="breadcrumb" aria-label="当前位置"></nav>
 
         <!-- 工具栏 -->
         <div id="toolbar" class="toolbar">
             <div class="toolbar-left">
                 <div class="search-box">
-                    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-                    </svg>
-                    <input class="search-input" type="text" placeholder="搜索文件...">
+                    <svg class="ic search-icon" aria-hidden="true"><use href="#i-search"></use></svg>
+                    <input class="search-input" type="search" placeholder="搜索文件（按 / 聚焦）" aria-label="搜索文件" autocomplete="off" enterkeyhint="search">
                 </div>
-                <div class="sort-group">
-                    <button class="sort-btn" data-sort="name">名称</button>
-                    <button class="sort-btn" data-sort="size">大小</button>
-                    <button class="sort-btn" data-sort="modified">修改时间</button>
+                <div class="sort-group" role="group" aria-label="排序">
+                    <button type="button" class="sort-btn" data-sort="name">名称</button>
+                    <button type="button" class="sort-btn" data-sort="size">大小</button>
+                    <button type="button" class="sort-btn" data-sort="modified">修改时间</button>
                 </div>
+                <select class="sort-select" aria-label="排序">
+                    <option value="name:asc">名称 A→Z</option>
+                    <option value="name:desc">名称 Z→A</option>
+                    <option value="modified:desc">最近修改</option>
+                    <option value="modified:asc">最早修改</option>
+                    <option value="size:desc">从大到小</option>
+                    <option value="size:asc">从小到大</option>
+                </select>
             </div>
             <div class="toolbar-right">
-                <span class="selected-count"></span>
-                <button class="btn btn-sm batch-action btn-zip" style="display:none" title="打包下载">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                </button>
-                <button class="btn btn-sm batch-action btn-delete" style="display:none" title="删除">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                </button>
-                <div class="toolbar-divider"></div>
-                <button class="btn btn-sm btn-mkdir" title="新建文件夹">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2v11z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
-                </button>
-                <button class="btn btn-sm btn-newfile" title="新建文件">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-                </button>
-                <button class="btn btn-primary btn-sm btn-upload" title="上传">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                    <span>上传</span>
-                </button>
-                <button class="btn btn-sm btn-view-toggle" title="切换视图">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                <div class="selection-bar">
+                    <button type="button" class="btn btn-sm btn-clear-selection" title="取消选择（Esc）" aria-label="取消选择"><svg class="ic"><use href="#i-close"></use></svg></button>
+                    <span class="selected-count"></span>
+                    <button type="button" class="btn btn-sm btn-zip" title="打包下载" aria-label="打包下载"><svg class="ic"><use href="#i-archive"></use></svg></button>
+                    <button type="button" class="btn btn-sm btn-delete" title="删除（Delete）" aria-label="删除"><svg class="ic"><use href="#i-trash"></use></svg></button>
+                    <div class="toolbar-divider"></div>
+                </div>
+                <button type="button" class="btn btn-sm btn-mkdir" title="新建文件夹" aria-label="新建文件夹"><svg class="ic"><use href="#i-folder-plus"></use></svg></button>
+                <button type="button" class="btn btn-sm btn-newfile" title="新建文件" aria-label="新建文件"><svg class="ic"><use href="#i-file-plus"></use></svg></button>
+                <button type="button" class="btn btn-sm btn-view-toggle" title="切换视图" aria-label="切换视图"></button>
+                <button type="button" class="btn btn-primary btn-sm btn-upload upload-trigger" title="上传">
+                    <span class="upload-trigger-icon"><svg class="ic"><use href="#i-upload"></use></svg><span class="upload-ring" aria-hidden="true"></span></span>
+                    <span class="upload-trigger-label">上传</span>
                 </button>
             </div>
         </div>
 
-        <!-- 文件列表 -->
+        <!-- 文件列表（结构由 file-list.js 生成） -->
         <main id="file-list" class="file-list"></main>
 
         <!-- 上传面板 -->
-        <div id="upload-panel" class="upload-panel glass">
+        <section id="upload-panel" class="upload-panel glass" aria-label="上传">
             <div class="upload-panel-header">
-                <h3>上传文件</h3>
-                <button class="icon-btn upload-panel-close">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
+                <div class="upload-panel-heading">
+                    <h3>上传</h3>
+                    <span class="upload-summary" aria-live="polite"></span>
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm upload-clear" hidden>清除已完成</button>
+                <button type="button" class="icon-btn upload-panel-close" title="收起" aria-label="收起上传面板"><svg class="ic"><use href="#i-close"></use></svg></button>
             </div>
             <div class="upload-panel-actions">
-                <button class="btn btn-sm btn-select-files">选择文件</button>
-                <button class="btn btn-sm btn-select-folder">选择文件夹</button>
+                <button type="button" class="btn btn-sm btn-select-files"><svg class="ic"><use href="#i-file-plus"></use></svg>选择文件</button>
+                <button type="button" class="btn btn-sm btn-select-folder"><svg class="ic"><use href="#i-folder-plus"></use></svg>选择文件夹</button>
             </div>
             <div class="upload-list"></div>
-        </div>
+        </section>
 
         <!-- 拖拽覆盖层 -->
         <div id="drop-overlay" class="drop-overlay">
             <div class="drop-overlay-content">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                    <polyline points="17 8 12 3 7 8"/>
-                    <line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-                <p>释放以上传文件</p>
+                <svg class="ic" aria-hidden="true"><use href="#i-upload"></use></svg>
+                <p>松开即可上传到当前文件夹</p>
             </div>
         </div>
 
         <!-- 预览模态框 -->
-        <div id="preview-modal" class="preview-modal">
-            <div class="preview-modal-inner glass">
+        <div id="preview-modal" class="preview-modal" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+            <div class="preview-modal-inner">
                 <div class="preview-header">
-                    <span class="preview-title"></span>
+                    <div class="preview-heading">
+                        <span class="preview-title" id="preview-title"></span>
+                        <span class="preview-sub"></span>
+                    </div>
                     <div class="preview-header-actions">
-                        <button class="icon-btn preview-edit" title="编辑" style="display:none">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                        </button>
-                        <button class="icon-btn preview-download" title="下载">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                        </button>
-                        <button class="icon-btn preview-close" title="关闭">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                        </button>
+                        <button type="button" class="icon-btn preview-nav preview-prev" title="上一个（←）" aria-label="上一个" hidden><svg class="ic"><use href="#i-chevron-left"></use></svg></button>
+                        <button type="button" class="icon-btn preview-nav preview-next" title="下一个（→）" aria-label="下一个" hidden><svg class="ic"><use href="#i-chevron-right"></use></svg></button>
+                        <button type="button" class="icon-btn preview-edit" title="编辑" aria-label="编辑" hidden><svg class="ic"><use href="#i-edit"></use></svg></button>
+                        <button type="button" class="icon-btn preview-download" title="下载" aria-label="下载"><svg class="ic"><use href="#i-download"></use></svg></button>
+                        <button type="button" class="icon-btn preview-close" title="关闭（Esc）" aria-label="关闭"><svg class="ic"><use href="#i-close"></use></svg></button>
                     </div>
                 </div>
                 <div class="preview-content"></div>
@@ -117,15 +187,11 @@
     </div>
 
     <!-- 移动端浮动上传按钮 -->
-    <button class="btn-upload-float" id="upload-float" title="上传">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-        </svg>
+    <button type="button" class="btn-upload-float upload-trigger" id="upload-float" title="上传" aria-label="上传">
+        <span class="upload-trigger-icon"><svg class="ic"><use href="#i-upload"></use></svg><span class="upload-ring" aria-hidden="true"></span></span>
     </button>
 
-    <!-- tus-js-client（延迟加载） -->
-    <script src="/static/vendor/tus.min.js" defer></script>
-    <!-- 应用入口 -->
+    <!-- 应用入口；tus 上传组件在第一次上传时才按需加载 -->
     <script type="module" src="/static/js/main.js"></script>
 </body>
 </html>

@@ -12,6 +12,8 @@ const ICONS = {
 
 const CYCLE = ['auto', 'light', 'dark'];
 
+const THEME_COLOR = { light: '#f8f9fc', dark: '#0d1117' };
+
 function applyTheme(theme) {
     const root = document.documentElement;
     if (theme === 'auto') {
@@ -19,7 +21,14 @@ function applyTheme(theme) {
     } else {
         root.setAttribute('data-theme', theme);
     }
-    localStorage.setItem('theme', theme);
+    // 浏览器地址栏、状态栏的颜色跟随主题；跟随系统时交给 meta 上的 media 条件
+    for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+        const scheme = meta.media.includes('dark') ? 'dark' : 'light';
+        meta.content = THEME_COLOR[theme === 'auto' ? scheme : theme];
+    }
+    try {
+        localStorage.setItem('theme', theme);
+    } catch { /* 存不了就只在本次会话生效 */ }
 }
 
 export function initThemeToggle() {
@@ -29,7 +38,8 @@ export function initThemeToggle() {
     const render = () => {
         const theme = state.theme;
         btn.innerHTML = ICONS[theme] || ICONS.auto;
-        btn.title = `当前: ${theme === 'auto' ? '跟随系统' : theme === 'light' ? '浅色' : '深色'}`;
+        btn.title = `主题：${theme === 'auto' ? '跟随系统' : theme === 'light' ? '浅色' : '深色'}（点击切换）`;
+        btn.setAttribute('aria-label', btn.title);
         applyTheme(theme);
     };
 

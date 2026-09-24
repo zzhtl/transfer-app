@@ -52,14 +52,29 @@ function flush() {
     }
 }
 
+/** localStorage 在隐私模式等场景下可能直接抛异常，读不到就用默认值 */
+function stored(key, fallback) {
+    try {
+        return localStorage.getItem(key) || fallback;
+    } catch {
+        return fallback;
+    }
+}
+
 /** 初始状态 */
 const raw = {
     /** 当前路径 */
     currentPath: '',
     /** 文件列表 */
     files: [],
-    /** 加载状态 */
+    /** files 属于哪个目录（切换目录时 files 要等响应回来才更新） */
+    filesPath: null,
+    /** 进入新目录且响应偏慢时为 true（显示骨架屏） */
     loading: false,
+    /** 后台刷新或搜索进行中（只显示顶部细进度条，不替换列表） */
+    refreshing: false,
+    /** 服务端搜索进行中 */
+    searching: false,
     /** 排序：name | size | modified */
     sortBy: 'name',
     /** 排序方向 */
@@ -77,13 +92,15 @@ const raw = {
     /** 预览文件信息 */
     preview: null,
     /** 主题: light | dark | auto */
-    theme: localStorage.getItem('theme') || 'auto',
+    theme: stored('theme', 'auto'),
     /** 右键菜单 */
     contextMenu: null,
     /** 视图模式: list | grid */
-    viewMode: localStorage.getItem('viewMode') || 'list',
+    viewMode: stored('viewMode', 'list'),
     /** 是否需要登录（会话失效或未登录时置 true） */
     authRequired: false,
+    /** 上传汇总 { active, total, done, failed, percent }，没有上传时为 null */
+    uploadSummary: null,
 };
 
 export const state = createReactive(raw);

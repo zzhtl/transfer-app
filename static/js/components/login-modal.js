@@ -4,7 +4,7 @@
  */
 
 import { state, subscribe } from '../store.js';
-import { login } from '../api.js';
+import { login, friendlyError } from '../api.js';
 
 let overlayEl = null;
 
@@ -12,10 +12,10 @@ export function initLoginModal(onAuthed) {
     overlayEl = document.createElement('div');
     overlayEl.className = 'login-overlay';
     overlayEl.innerHTML = `
-        <div class="login-card">
-            <h2 class="login-title">需要登录</h2>
+        <div class="login-card" role="dialog" aria-modal="true" aria-labelledby="login-title">
+            <h2 class="login-title" id="login-title">需要登录</h2>
             <p class="login-hint">请输入访问密码</p>
-            <input type="password" class="login-input" placeholder="密码" autocomplete="current-password">
+            <input type="password" class="login-input" placeholder="密码" autocomplete="current-password" aria-label="密码">
             <div class="login-error"></div>
             <button class="btn btn-primary login-submit">登录</button>
         </div>`;
@@ -36,7 +36,8 @@ export function initLoginModal(onAuthed) {
             state.authRequired = false;
             if (onAuthed) onAuthed();
         } catch (e) {
-            errEl.textContent = e.status === 401 ? '密码错误' : `登录失败: ${e.message}`;
+            errEl.textContent = e.status === 401 ? '密码错误' : `登录失败：${friendlyError(e)}`;
+            input.select();
         } finally {
             submit.disabled = false;
         }
