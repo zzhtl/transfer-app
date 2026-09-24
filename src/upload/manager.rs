@@ -94,17 +94,22 @@ impl UploadManager {
             .as_secs();
         let expiry = self.expiration.as_secs();
 
-        let expired: Vec<String> = {
-            let sessions = self.sessions.read();
-            let mut ids = Vec::new();
-            for (id, arc) in sessions.iter() {
-                let s = arc.blocking_read();
-                if now.saturating_sub(s.last_active) > expiry {
-                    ids.push(id.clone());
-                }
+        // 先在 parking_lot 锁里把 Arc 拷出来，放锁后再逐个 `.read().await`：
+        // 这里跑在 tokio 任务里，`blocking_read` 会直接 panic（release 下即进程退出），
+        // 而 parking_lot 的 guard 又不能跨 await 持有。
+        let sessions: Vec<(String, Arc<RwLock<UploadSession>>)> = self
+            .sessions
+            .read()
+            .iter()
+            .map(|(id, arc)| (id.clone(), arc.clone()))
+            .collect();
+
+        let mut expired = Vec::new();
+        for (id, arc) in sessions {
+            if now.saturating_sub(arc.read().await.last_active) > expiry {
+                expired.push(id);
             }
-            ids
-        };
+        }
 
         for id in &expired {
             let arc = {
@@ -119,5 +124,41 @@ impl UploadManager {
         }
 
         expired.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session(file_id: &str, last_active: u64) -> UploadSession {
+        UploadSession {
+            file_id: file_id.to_string(),
+            filename: format!("{file_id}.bin"),
+            relative_path: None,
+            target_dir: PathBuf::from("/"),
+            total_size: 10,
+            uploaded: 0,
+            created_at: last_active,
+            last_active,
+            expected_checksum: None,
+            mime_hint: None,
+        }
+    }
+
+    /// janitor 是在 tokio 任务里调用它的。之前这里用 `blocking_read`，在运行时线程上
+    /// 会直接 panic，release 下 `panic = "abort"` 就是整个进程退出——只要重启时
+    /// 有一个没传完的上传会话，服务就起不来（首个 interval tick 立即触发）。
+    #[tokio::test]
+    async fn cleanup_runs_inside_the_runtime_and_only_drops_stale_sessions() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let manager = UploadManager::new(dir.path().to_path_buf(), Duration::from_secs(60));
+        let now = crate::auth::now_secs();
+        manager.create(session("stale", now - 3600));
+        manager.create(session("fresh", now));
+
+        assert_eq!(manager.cleanup_expired().await, 1);
+        assert!(manager.get("stale").is_none());
+        assert!(manager.get("fresh").is_some());
     }
 }
