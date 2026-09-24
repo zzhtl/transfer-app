@@ -8,9 +8,12 @@ pub mod static_assets;
 pub mod upload;
 pub mod zipdl;
 
+use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+use axum::http::{Extensions, HeaderMap, StatusCode, Version};
 use axum::Router;
 use tower::{Layer as _, ServiceBuilder};
 use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::compression::predicate::{Predicate as _, SizeAbove};
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::normalize_path::{NormalizePath, NormalizePathLayer};
@@ -39,6 +42,26 @@ async fn api_not_found(
     axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
 ) -> crate::error::AppError {
     crate::error::AppError::NotFound(format!("接口 {} 不存在", uri.path()))
+}
+
+/// 只压缩文本类响应。
+///
+/// 默认谓词除了图片什么都压：视频、zip、octet-stream 的下载也被实时 gzip，不可压缩的
+/// 数据白白吃满一个核，吞吐被压到 gzip 的速度；压缩后还没了 Content-Length，浏览器
+/// 下载就显示不出进度和剩余时间。带 Content-Disposition 的都是文件下载或打包，一律不压。
+fn compressible(_: StatusCode, _: Version, headers: &HeaderMap, _: &Extensions) -> bool {
+    if headers.contains_key(CONTENT_DISPOSITION) {
+        return false;
+    }
+    let Some(content_type) = headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    let mime = content_type.split(';').next().unwrap_or_default().trim();
+    mime.starts_with("text/")
+        || matches!(
+            mime,
+            "application/json" | "application/javascript" | "application/xml" | "image/svg+xml"
+        )
 }
 
 /// 构建完整的路由树
@@ -114,6 +137,7 @@ pub fn build_router(state: AppState) -> Router {
                         .br(true)
                         .gzip(true)
                         .no_br()  // 只用 gzip，br 对动态内容收益不大
+                        .compress_when(SizeAbove::new(1024).and(compressible)),
                 )
                 .layer(CorsLayer::very_permissive())
                 // 鉴权：CORS 内侧（OPTIONS 已被 CORS 短路，tus 预检不受影响）、CatchPanic 外侧

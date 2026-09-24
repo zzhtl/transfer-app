@@ -168,6 +168,186 @@ async fn reserved_dir_cannot_be_written_through_the_api() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+fn zip_names(body: &[u8]) -> Vec<String> {
+    // 用 async_zip 的同步读不方便，这里直接扫中央目录：签名 PK\x01\x02，
+    // 文件名长度在偏移 28，文件名从偏移 46 开始
+    let mut names = Vec::new();
+    let mut i = 0;
+    while i + 46 <= body.len() {
+        if &body[i..i + 4] == b"PK\x01\x02" {
+            let len = u16::from_le_bytes([body[i + 28], body[i + 29]]) as usize;
+            names.push(String::from_utf8_lossy(&body[i + 46..i + 46 + len]).into_owned());
+            i += 46 + len;
+        } else {
+            i += 1;
+        }
+    }
+    names.sort();
+    names
+}
+
+/// 前端一直发重复的 `paths` 参数；之前后端按单个字符串解析，第二个 `paths`
+/// 触发 serde 的 duplicate field，多选打包必定 400。
+#[tokio::test]
+async fn zip_accepts_repeated_paths_and_keeps_commas_and_spaces() {
+    let app = TestApp::new();
+    app.write("docs/a,b.txt", b"comma");
+    app.write("docs/ lead.txt", b"space");
+    app.write("docs/sub/deep.txt", b"deep");
+
+    let uri = "/api/download-zip?paths=docs%2Fa%2Cb.txt&paths=docs%2F%20lead.txt&paths=docs%2Fsub";
+    let (status, headers, body) = app.get(uri).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CONTENT_TYPE], "application/zip");
+    // 条目相对于各自的父目录，不再多套一层 docs/
+    assert_eq!(
+        zip_names(&body),
+        vec![" lead.txt", "a,b.txt", "sub/deep.txt"]
+    );
+}
+
+#[tokio::test]
+async fn zip_without_paths_is_a_bad_request() {
+    let app = TestApp::new();
+    let (status, _, _) = app.get("/api/download-zip?name=x.zip").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+/// 默认压缩谓词会把视频、zip、octet-stream 的下载也实时 gzip：吞吐被压到 gzip 的速度，
+/// 还丢掉了 Content-Length，浏览器看不到下载进度。
+#[tokio::test]
+async fn file_downloads_are_not_gzipped_but_api_json_is() {
+    let app = TestApp::new();
+    // 全 0 数据极易压缩：如果还被压，这里一定能看出来
+    app.write("big.bin", &vec![0u8; 64 * 1024]);
+    app.write("notes.txt", &vec![b'a'; 64 * 1024]);
+    for i in 0..200 {
+        app.write(&format!("many/file-{i:03}.txt"), b"x");
+    }
+
+    for uri in [
+        "/api/download/big.bin?download=1",
+        "/api/download/notes.txt",
+    ] {
+        let (status, headers, body) = app
+            .send(
+                Request::get(uri)
+                    .header(header::ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .expect("请求"),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        assert!(
+            headers.get(header::CONTENT_ENCODING).is_none(),
+            "{uri} 不该被压缩"
+        );
+        assert_eq!(headers[header::CONTENT_LENGTH], "65536", "{uri}");
+        assert_eq!(body.len(), 64 * 1024);
+    }
+
+    let (_, headers, _) = app
+        .send(
+            Request::get("/api/files?path=many")
+                .header(header::ACCEPT_ENCODING, "gzip")
+                .body(Body::empty())
+                .expect("请求"),
+        )
+        .await;
+    assert_eq!(headers[header::CONTENT_ENCODING], "gzip");
+}
+
+#[tokio::test]
+async fn download_headers_are_valid_for_awkward_names() {
+    let app = TestApp::new();
+    app.write("dir/报告 \"v2\".txt", b"hello");
+    let (status, headers, _) = app
+        .get("/api/download/dir/%E6%8A%A5%E5%91%8A%20%22v2%22.txt?download=1")
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let disposition = headers[header::CONTENT_DISPOSITION]
+        .to_str()
+        .expect("ASCII");
+    assert!(
+        disposition.starts_with("attachment; filename=\""),
+        "{disposition}"
+    );
+    assert!(
+        disposition.ends_with("filename*=UTF-8''%E6%8A%A5%E5%91%8A%20%22v2%22.txt"),
+        "{disposition}"
+    );
+    let last_modified = headers[header::LAST_MODIFIED].to_str().expect("ASCII");
+    assert!(
+        httpdate::parse_http_date(last_modified).is_ok(),
+        "{last_modified}"
+    );
+    assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn control_characters_in_file_names_do_not_break_the_response() {
+    let app = TestApp::new();
+    app.write("line\nbreak.txt", b"hi");
+    let (status, headers, body) = app.get("/api/download/line%0Abreak.txt").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers.contains_key(header::CONTENT_DISPOSITION));
+    assert_eq!(&body[..], b"hi");
+}
+
+/// 文件在两次请求之间变了，续传必须回完整的 200，不能把新旧内容拼在一起
+#[tokio::test]
+async fn range_is_ignored_when_if_range_no_longer_matches() {
+    let app = TestApp::new();
+    app.write("f.txt", b"0123456789");
+    let (_, headers, _) = app.get("/api/download/f.txt").await;
+    let etag = headers[header::ETAG].to_str().expect("etag").to_string();
+    let last_modified = headers[header::LAST_MODIFIED]
+        .to_str()
+        .expect("date")
+        .to_string();
+
+    let ranged = |if_range: &str| {
+        Request::get("/api/download/f.txt")
+            .header(header::RANGE, "bytes=5-")
+            .header(header::IF_RANGE, if_range)
+            .body(Body::empty())
+            .expect("请求")
+    };
+
+    let (status, _, body) = app.send(ranged(&etag)).await;
+    assert_eq!(
+        (status, &body[..]),
+        (StatusCode::PARTIAL_CONTENT, &b"56789"[..])
+    );
+    let (status, _, body) = app.send(ranged(&last_modified)).await;
+    assert_eq!(
+        (status, &body[..]),
+        (StatusCode::PARTIAL_CONTENT, &b"56789"[..])
+    );
+
+    let (status, _, body) = app.send(ranged("\"stale-etag\"")).await;
+    assert_eq!((status, &body[..]), (StatusCode::OK, &b"0123456789"[..]));
+    let (status, _, _) = app.send(ranged("Thu, 01 Jan 2004 00:00:00 GMT")).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn inline_active_content_is_sandboxed() {
+    let app = TestApp::new();
+    app.write("page.html", b"<script>alert(1)</script>");
+    app.write("logo.svg", b"<svg xmlns='http://www.w3.org/2000/svg'/>");
+    app.write("doc.pdf", b"%PDF-1.4");
+
+    for uri in ["/api/download/page.html", "/api/download/logo.svg"] {
+        let (_, headers, _) = app.get(uri).await;
+        assert_eq!(headers[header::CONTENT_SECURITY_POLICY], "sandbox", "{uri}");
+    }
+    // PDF 要能在浏览器里内嵌显示，不能加 sandbox
+    let (_, headers, _) = app.get("/api/download/doc.pdf").await;
+    assert!(headers.get(header::CONTENT_SECURITY_POLICY).is_none());
+}
+
 async fn post_json(app: &TestApp, uri: &str, json: serde_json::Value) -> (StatusCode, Bytes) {
     let (status, _, body) = app
         .send(

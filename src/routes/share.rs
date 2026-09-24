@@ -240,7 +240,7 @@ pub async fn zip(
         .file_name()
         .map(|n| format!("{}.zip", n.to_string_lossy()))
         .unwrap_or_else(|| "share.zip".to_string());
-    Ok(zip_response(vec![abs], state.root.clone(), name))
+    Ok(zip_response(vec![abs], name))
 }
 
 /// GET /api/s/{token}/list?code=&path= — 目录分享浏览（非 download_only）
