@@ -44,11 +44,22 @@ export function initUploadPanel() {
     summaryEl = panelEl.querySelector('.upload-summary');
     clearBtn = panelEl.querySelector('.upload-clear');
 
+    // iPad 的桌面模式使用 Mac 标识；这里只调整位置说明，不限制上传能力。
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS) {
+        const iosGuide = panelEl.querySelector('[data-platform="ios"]');
+        panelEl.querySelector('.upload-locations').prepend(iosGuide);
+        iosGuide.open = true;
+        panelEl.querySelector('[data-platform="android"]').open = false;
+    }
+
     panelEl.querySelector('.upload-panel-close')?.addEventListener('click', () => {
         state.uploadPanelOpen = false;
     });
-    panelEl.querySelector('.btn-select-files')?.addEventListener('click', () => pickFiles(false));
-    panelEl.querySelector('.btn-select-folder')?.addEventListener('click', () => pickFiles(true));
+    panelEl.querySelector('.btn-select-media')?.addEventListener('click', () => pickFiles('media'));
+    panelEl.querySelector('.btn-select-files')?.addEventListener('click', () => pickFiles('files'));
+    panelEl.querySelector('.btn-select-folder')?.addEventListener('click', () => pickFiles('folder'));
     clearBtn?.addEventListener('click', clearFinished);
 
     // 条目上的按钮统一委托
@@ -70,11 +81,19 @@ export function initUploadPanel() {
     renderEmpty();
 }
 
-function pickFiles(folder) {
+function pickFiles(mode) {
     const input = document.createElement('input');
     input.type = 'file';
-    if (folder) input.webkitdirectory = true;
+    if (mode === 'folder') {
+        if (!('webkitdirectory' in input)) {
+            showToast('此浏览器不支持整文件夹上传，请选择照片和视频或其他文件', 'info');
+            return;
+        }
+        input.webkitdirectory = true;
+    }
     else input.multiple = true;
+    // 让系统提供相册/媒体选择入口，不指定路径，也不强制打开相机。
+    if (mode === 'media') input.accept = 'image/*,video/*';
     input.addEventListener('change', () => {
         addFiles([...input.files].map(file => ({ file, relativePath: file.webkitRelativePath || '' })));
     });

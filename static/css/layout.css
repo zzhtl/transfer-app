@@ -533,12 +533,38 @@ a, button, input, select, textarea, label, .file-row, .landing-item, .folder-pic
 }
 .upload-panel-actions {
     display: flex;
+    flex-wrap: wrap;
+    flex-shrink: 0;
     gap: var(--space-sm);
     padding: var(--space-md) var(--space-lg);
     border-bottom: 1px solid var(--border);
 }
+.upload-picker-hint {
+    flex-basis: 100%;
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    line-height: 1.6;
+}
+.upload-locations {
+    flex: 0 1 auto;
+    min-height: 64px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: var(--space-sm) var(--space-lg);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    line-height: 1.6;
+    overscroll-behavior: contain;
+}
+.upload-locations details + details { margin-top: var(--space-sm); }
+.upload-locations summary { cursor: pointer; color: var(--text-primary); font-weight: 500; }
+.upload-locations p, .upload-locations ul { margin-top: var(--space-xs); }
+.upload-locations ul { list-style: none; }
+.upload-locations code { overflow-wrap: anywhere; }
 .upload-list {
     flex: 1;
+    min-height: 80px;
     overflow-y: auto;
     padding: var(--space-sm);
     overscroll-behavior: contain;
