@@ -79,6 +79,7 @@
         <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></symbol>
         <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></symbol>
         <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+        <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
     </svg>
 
     <div id="app" class="app">
@@ -151,8 +152,33 @@
                 <button type="button" class="icon-btn upload-panel-close" title="收起" aria-label="收起上传面板"><svg class="ic"><use href="#i-close"></use></svg></button>
             </div>
             <div class="upload-panel-actions">
-                <button type="button" class="btn btn-sm btn-select-files"><svg class="ic"><use href="#i-file-plus"></use></svg>选择文件</button>
-                <button type="button" class="btn btn-sm btn-select-folder"><svg class="ic"><use href="#i-folder-plus"></use></svg>选择文件夹</button>
+                <button type="button" class="btn btn-primary btn-sm btn-select-media"><svg class="ic"><use href="#i-image"></use></svg>照片和视频</button>
+                <button type="button" class="btn btn-sm btn-select-folder"><svg class="ic"><use href="#i-folder-plus"></use></svg>整个文件夹</button>
+                <button type="button" class="btn btn-sm btn-select-files"><svg class="ic"><use href="#i-file-plus"></use></svg>其他文件</button>
+                <p class="upload-picker-hint">选择后自动上传，文件夹保留目录结构；新增照片需再次选择。相册全选和目录选择能力取决于系统和浏览器。</p>
+            </div>
+            <div class="upload-locations" aria-label="手机照片常见位置">
+                <details data-platform="android" open>
+                    <summary>安卓：常见照片目录</summary>
+                    <p>内部存储通常为 <code>/storage/emulated/0/</code>，常见别名为 <code>/sdcard/</code>。</p>
+                    <ul>
+                        <li><code>DCIM/Camera/</code>：相机照片、拍摄视频</li>
+                        <li><code>DCIM/</code>：相机及其他子目录</li>
+                        <li><code>Pictures/</code>：截图、应用保存的图片</li>
+                        <li><code>Download/</code>：下载的图片和视频</li>
+                        <li><code>Movies/</code>：其他视频</li>
+                    </ul>
+                    <p>点击“整个文件夹”后，在系统选择器中进入这些目录。位置因手机和应用而异，网页无法直接跳转；选择 DCIM 也不代表包含全部相册内容。</p>
+                </details>
+                <details data-platform="ios">
+                    <summary>iPhone / iPad：照片与文件位置</summary>
+                    <ul>
+                        <li><strong>照片图库</strong>：点击“照片和视频”，从系统照片选择器中选择。</li>
+                        <li><strong>已保存到“文件”的内容</strong>：浏览 → 我的 iPhone / 我的 iPad，或 iCloud 云盘。</li>
+                        <li><strong>下载内容</strong>：常见于 iCloud 云盘 → 下载，实际位置以下载设置为准。</li>
+                    </ul>
+                    <p>照片图库不提供网页可选择的文件夹路径。“整个文件夹”用于“文件”中允许选择的目录。</p>
+                </details>
             </div>
             <div class="upload-list"></div>
         </section>
